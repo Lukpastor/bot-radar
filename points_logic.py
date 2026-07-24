@@ -42,8 +42,8 @@ Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        # Usando o modelo atualizado e amplamente suportado
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Atualizado para o modelo padrão atual da API do Google
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         
         texto_resposta = response.text.strip()
