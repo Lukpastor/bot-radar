@@ -8,19 +8,16 @@ import database
 import handlers
 from config import logger
 
-def main() -> None:
+async def run_bot_async():
     load_dotenv() 
     
-    # Inicializa o banco de dados de forma síncrona na inicialização
-    try:
-        asyncio.run(database.iniciar_banco())
-    except Exception as e:
-        logger.error(f"Erro ao iniciar banco no main: {e}")
+    # Inicializa o banco de dados de forma assíncrona
+    await database.iniciar_banco()
 
     bot_token = os.getenv('BOT_TOKEN')
     if not bot_token:
         logger.error("CRÍTICO: Token não encontrado no arquivo .env!")
-        exit(1) 
+        return 
     
     app = None
     for attempt in range(5):
@@ -28,7 +25,7 @@ def main() -> None:
             app = ApplicationBuilder().token(bot_token).build()
             break 
         except Exception: 
-            time.sleep(5)
+            await asyncio.sleep(5)
 
     if app is None: 
         return
@@ -55,10 +52,22 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
     app.add_handler(CallbackQueryHandler(handlers.handle_callback))
 
-    logger.info("Bot 2.0 Assíncrono Operante - Sistema de Metas e Consulta Online!")
+    # Inicialização e execução nativa compatível com Python 3.13+
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     
-    # Método padrão e seguro de polling que lida com o loop internamente
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    logger.info("Bot 2.0 Assíncrono Operante - Sistema de Metas e Consulta Online!")
+
+    # Mantém o bot rodando indefinidamente na nuvem
+    stop_signal = asyncio.get_running_loop().create_future()
+    await stop_signal
+
+def main() -> None:
+    try:
+        asyncio.run(run_bot_async())
+    except (KeyboardInterrupt, SystemExit):
+        pass
 
 if __name__ == '__main__':
     main()
