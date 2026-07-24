@@ -1,170 +1,62 @@
-import json
-import re
 import os
-import warnings
+import json
 import google.generativeai as genai
-from config import logger, pontos_os, sinonimos, CATEGORIAS_ORDENADAS
 from dotenv import load_dotenv
+from config import pontos_os, sinonimos, CATEGORIAS_ORDENADAS, logger
 
-# Silencia o aviso chato (FutureWarning) do pacote google.generativeai
-warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
-
-# Carrega a chave do Google e configura a API
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+API_KEY = os.getenv("GEMINI_API_KEY")
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel(
-        'gemini-1.5-flash',
-        generation_config={"response_mime_type": "application/json"}
-    )
-else:
-    logger.error("🚨 CHAVE DO GEMINI NÃO ENCONTRADA NO .ENV!")
-    model = None
+if API_KEY:
+    genai.configure(api_key=API_KEY)
 
-def extrair_cliente(texto: str) -> str:
-    match = re.search(r'(?:nome do cliente|cliente):\s*([^\n\r]+)', texto, re.IGNORECASE)
-    if match:
-        return match.group(1).strip().upper()
-    return "NÃO INFORMADO"
-
-def processar_com_ia(texto: str) -> dict:
-    texto_lower = texto.lower()
-    cliente_extraido = extrair_cliente(texto)
-    
-    # ====================================================
-    # PASSO 0: CAPTURA DE ATRIBUIÇÃO DIRETA (Ex: Serviço = 1)
-    # ====================================================
-    padrao_atribuicao = re.findall(r'([^\n=]+?)\s*=\s*([0-9]+(?:\.[0-9]+)?)', texto)
-    
-    if padrao_atribuicao:
-        servicos_personalizados = []
-        pontos_totais_personalizados = 0.0
-        
-        for desc, valor in padrao_atribuicao:
-            desc_limpa = desc.strip().upper()
-            if desc_limpa:
-                servicos_personalizados.append(desc_limpa)
-                pontos_totais_personalizados += float(valor)
-        
-        if servicos_personalizados:
-            servico_final = " + ".join(servicos_personalizados)
-            if re.search(r'\b(infra|rompimento|otdr|ce|cd|cto)\b', texto_lower):
-                 cliente_definitivo = "INFRAESTRUTURA DE REDE"
-            else:
-                 cliente_definitivo = cliente_extraido
-                 
-            return {
-                "is_os": True, "servicos": [servico_final], 
-                "pontos": pontos_totais_personalizados, "cliente": cliente_definitivo, "resposta_chat": ""
-            }
-
-    # ====================================================
-    # PASSO 0.5: PRIORIDADE ABSOLUTA PARA O TIPO INFORMADO NA OS
-    # ====================================================
-    match_tipo = re.search(r'tipo\s+e\s+suporte\s*:\s*(.+)', texto_lower)
-    if match_tipo:
-        tipo = match_tipo.group(1).strip()
-        if tipo == "reparo" and "reparo" in pontos_os:
-            return {
-                "is_os": True,
-                "servicos": ["reparo"],
-                "pontos": pontos_os["reparo"],
-                "cliente": cliente_extraido,
-                "resposta_chat": ""
-            }
-
-    # ====================================================
-    # PASSO 1: BUSCA DETERMINÍSTICA DIRETA (MÉTODO ULTRA-RÁPIDO)
-    # ====================================================
-    servicos_finais = []
-    
-    if re.search(r'\b(tvbox|tv box|netflix|assistência|funcionando normal|funcionando normalmente|tudo normal)\b', texto_lower):
-        servicos_finais.append("visita improdutiva")
-    
-    for categoria in CATEGORIAS_ORDENADAS:
-        if categoria in sinonimos:
-            for frase in sinonimos[categoria]:
-                if frase.lower() in texto_lower:
-                    if categoria not in servicos_finais:
-                        servicos_finais.append(categoria)
-                    break 
-
-    if servicos_finais:
-        infra_validada = []
-        for s in servicos_finais:
-            if "infra" in s and not re.search(r'\b(poste|rua|ceo|espinado|caixa de emenda|cd|ce|otdr|drop|rompimento|cto)\b', texto_lower):
-                continue 
-            infra_validada.append(s)
-            
-        if infra_validada:
-            pontos_totais = sum(pontos_os[s] for s in infra_validada if s in pontos_os)
-            return {
-                "is_os": True, "servicos": infra_validada,
-                "pontos": pontos_totais, "cliente": cliente_extraido,
-                "resposta_chat": ""
-            }
-
-    # ====================================================
-    # PASSO 2: GOOGLE GEMINI API (NUVEM)
-    # ====================================================
-    if not model:
-        return {"is_os": True, "servicos": [], "pontos": 0.0, "cliente": cliente_extraido, "resposta_chat": ""}
+def processar_com_ia(texto_os: str) -> dict:
+    """
+    Usa a IA do Gemini para analisar o texto da O.S., extrair cliente,
+    serviços executados e calcular os pontos com base nas regras do config.py.
+    """
+    if not API_KEY:
+        logger.error("GEMINI_API_KEY não configurada.")
+        return {"is_os": False}
 
     prompt = f"""
-    Você é um extrator de dados estrito da Radar Internet. Sua ÚNICA função é analisar relatórios técnicos e extrair um JSON estruturado.
+Você é um assistente especialista em análise de Ordens de Serviço (O.S.) de provedores de internet.
+Sua tarefa é analisar o texto enviado pelo técnico e retornar um JSON estrito contendo:
+1. "is_os": true se for um relatório de serviço válido, false caso contrário.
+2. "cliente": O nome do cliente extraído do texto (se não achar, retorne "NÃO INFORMADO").
+3. "servicos": Uma lista com os nomes exatos dos serviços encontrados, baseando-se estritamente na lista de serviços permitidos abaixo.
+4. "pontos": A soma total dos pontos correspondentes aos serviços encontrados.
 
-    MENSAGEM DO TÉCNICO: "{texto}"
+Lista de serviços permitidos e seus pontos:
+{json.dumps(pontos_os, ensure_ascii=False, indent=2)}
 
-    REGRAS DE OURO:
-    1. Extraia o nome do cliente em MAIÚSCULAS. Se não houver clareza, retorne "NÃO INFORMADO".
-    2. Se relatar problema em equipamento de terceiros (TVBox, roteador particular, celular) ou disser que a "internet já estava normal", classifique como "visita improdutiva".
-    3. Se existir "Tipo e suporte: reparo", a categoria deve ser obrigatoriamente "reparo", mesmo que o texto mencione CTO, caixa de emenda ou infraestrutura.
-    4. Somente classifique como "infra - reparo" quando o relatório for de uma OS da equipe de infraestrutura, e não apenas porque a infraestrutura foi acionada.
-    5. Para outros casos, tente enquadrar o serviço descrito EXATAMENTE em UMA destas categorias: {list(pontos_os.keys())}.
+Sinônimos e termos equivalentes para te ajudar a identificar os serviços:
+{json.dumps(sinonimos, ensure_ascii=False, indent=2)}
 
-    Obrigatório retornar APENAS o JSON no formato abaixo:
-    {{
-        "is_os": true,
-        "servicos": ["NOME_DA_CATEGORIA"],
-        "pontos": 0.0,
-        "cliente": "NOME DO CLIENTE",
-        "resposta_chat": ""
-    }}
-    """
+Regras importantes:
+- Retorne APENAS um objeto JSON válido, sem blocos de código em markdown (como ```json), sem texto antes e sem texto depois.
+- Formato esperado de saída:
+{{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["reparo"], "pontos": 1.0}}
+
+Texto da O.S. para analisar:
+""" + texto_os
 
     try:
+        # Usando o modelo atualizado e amplamente suportado
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
-        dados_extraidos = json.loads(response.text)
         
-        servicos_ia = []
-        pontos_ia = 0.0
+        texto_resposta = response.text.strip()
         
-        if dados_extraidos.get('is_os') and 'servicos' in dados_extraidos:
-            for s in dados_extraidos['servicos']:
-                servico_limpo = s.lower().strip()
-                
-                if "infra" in servico_limpo and not re.search(r'\b(poste|rua|ceo|espinado|caixa de emenda|cd|ce|otdr|drop|rompimento|cto)\b', texto_lower):
-                    if "retirada" in servico_limpo: servico_limpo = "retirada fibra"
-                    elif "instalação" in servico_limpo: servico_limpo = "instalação fibra"
-                    else: servico_limpo = "reparo"
-                
-                if servico_limpo in pontos_os:
-                    if servico_limpo not in servicos_ia: 
-                        servicos_ia.append(servico_limpo)
-                        pontos_ia += pontos_os[servico_limpo]
-
-        if servicos_ia:
-            dados_extraidos['servicos'] = servicos_ia
-            dados_extraidos['pontos'] = pontos_ia
-        else:
-             dados_extraidos['servicos'] = []
-             dados_extraidos['pontos'] = 0.0
-             
-        dados_extraidos['cliente'] = cliente_extraido
-        return dados_extraidos
+        # Remove eventuais marcações de markdown caso a IA coloque
+        if texto_resposta.startswith("```json"):
+            texto_resposta = texto_resposta[7:]
+        if texto_resposta.endswith("```"):
+            texto_resposta = texto_resposta[:-3]
+            
+        dados = json.loads(texto_resposta.strip())
+        return dados
 
     except Exception as e:
         logger.error(f"Erro na nuvem do Gemini: {e}")
-        return {"is_os": True, "servicos": [], "pontos": 0.0, "cliente": cliente_extraido, "resposta_chat": ""}
+        return {"is_os": False}
