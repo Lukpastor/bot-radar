@@ -43,7 +43,7 @@ Texto da O.S. para analisar:
 
     try:
         # Atualizado para o modelo padrão atual da API do Google
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-3.5-flash')
         response = model.generate_content(prompt)
         
         texto_resposta = response.text.strip()
