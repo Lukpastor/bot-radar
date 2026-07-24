@@ -11,6 +11,12 @@ from config import logger
 def main() -> None:
     load_dotenv() 
     
+    # Inicializa o banco de dados de forma síncrona na inicialização
+    try:
+        asyncio.run(database.iniciar_banco())
+    except Exception as e:
+        logger.error(f"Erro ao iniciar banco no main: {e}")
+
     bot_token = os.getenv('BOT_TOKEN')
     if not bot_token:
         logger.error("CRÍTICO: Token não encontrado no arquivo .env!")
@@ -21,9 +27,11 @@ def main() -> None:
         try:
             app = ApplicationBuilder().token(bot_token).build()
             break 
-        except Exception: time.sleep(5)
+        except Exception: 
+            time.sleep(5)
 
-    if app is None: return
+    if app is None: 
+        return
 
     # Sistema
     app.add_handler(CommandHandler("start", handlers.ajuda))
@@ -47,24 +55,10 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
     app.add_handler(CallbackQueryHandler(handlers.handle_callback))
 
-    # Inicialização correta do banco de dados assíncrono para o Python 3.13
-    async def iniciar_tudo():
-        await database.iniciar_banco()
-        logger.info("Bot 2.0 Assíncrono Operante - Sistema de Metas e Consulta Online!")
+    logger.info("Bot 2.0 Assíncrono Operante - Sistema de Metas e Consulta Online!")
+    
+    # Método padrão e seguro de polling que lida com o loop internamente
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
-    # Roda a inicialização e o polling de forma 100% segura pelo próprio app do telegram
-    async def run_bot():
-        await database.iniciar_banco()
-        logger.info("Bot 2.0 Assíncrono Operante - Sistema de Metas e Consulta Online!")
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-        
-        # Mantém o bot rodando eternamente na nuvem
-        stop_signal = asyncio.get_running_loop().create_future()
-        await stop_signal
-
-    try:
-        asyncio.run(run_bot())
-    except KeyboardInterrupt:
-        pass
+if __name__ == '__main__':
+    main()
