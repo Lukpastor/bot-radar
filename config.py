@@ -12,8 +12,6 @@ logger = logging.getLogger(__name__)
 # ==========================================
 # SEGURANÇA: ID DO DONO (MASTER)
 # ==========================================
-# Este é o seu ID. Você tem acesso total e pode usar
-# o comando /add para cadastrar outros técnicos.
 MASTER_ID = 1379071981
 
 META_MENSAL = 160
@@ -44,8 +42,8 @@ pontos_os = {
     'periódico': 1,
     'retirada wireless': 1,
     'retirada fibra': 1,
-    'RETIRADA':1,
-    'retirada':1,
+    'RETIRADA': 1,
+    'retirada': 1,
     'instalação de cabo de rede': 2,
 }
 
@@ -56,7 +54,8 @@ sinonimos = {
     'instalação fibra': [
         'instalação de fibra', 'instalacao de fibra optica', 'fibra optica instalada', 
         'passagem de fibra', 'ponto fibra novo', 'instalacao de rede de fibra', 
-        'instalação de fibra óptica realizada', 'instalação de fibra', 'instalacao fibra'
+        'instalação de fibra óptica realizada', 'instalação de fibra', 'instalacao fibra',
+        'instalação de fibra óptica realizada.'
     ],
     'retirada fibra': [
         'remocao fibra', 'fibra optica retirada', 'cabo fibra retirado', 'desativacao fibra',
@@ -71,11 +70,10 @@ sinonimos = {
         'cabos estavam mal encaixados', 'equipamentos estavam desligados',
         'equipamentos foram resetados pelo cliente', 'velocidade está conforme o contratado',
         'conector estava danificado', 'troca de conector', 'cabo de rede danificado',
-        'equipamentos resetados por queda de energia', 'roteador em comodato com defeito',
-        'roteador do cliente com defeito', 'reinstalação interna', 'reparo fibra',
+        'equipamentos resetados por queda de energia', 'roteador do cliente com defeito',
+        'reinstalação interna', 'reparo fibra',
         'roteador do cliente incompatível', 'rompimento de fibra local',
-        'onu com defeito', 'plano incompatível com a utilização', 'não há problemas locais',
-        'Roteador em comodato está com defeito apresentando quedas no tráfego e é necessário fazer a troca.'
+        'onu com defeito', 'plano incompatível com a utilização', 'não há problemas locais'
     ],
     'visita improdutiva': [
         'visita improdutiva', 'não foi encontrado nenhum problema', 
@@ -97,7 +95,9 @@ sinonimos = {
         'substituicao de ont', 'ont trocada', 'onu trocada', 'troca de onu', 'roteador trocado',
         'substituicao de roteador', 'mudanca de equipamento', 'troca de aparelho', 'troca de modem',
         'troca de roteador realizada', 'tipo e suporte:troca de equipamento',
-        'troca de onu realizada', 'onu está com defeito', 'roteador está com defeito'
+        'troca de onu realizada', 'onu está com defeito', 'roteador está com defeito',
+        'roteador em comodato está com defeito apresentando quedas no tráfego e é necessário fazer a troca.',
+        'é necessário fazer a troca', 'necessario fazer a troca', 'roteador em comodato está com defeito'
     ],
     'configuração': [
         'configuração de roteador efetuada', 'configuração realizada', 'config de roteador',
@@ -168,7 +168,6 @@ sinonimos = {
 # ==========================================
 # ORDEM DE LEITURA DO BOT
 # ==========================================
-# (Do serviço mais específico para o mais genérico, para não haver conflitos)
 CATEGORIAS_ORDENADAS = [
     'instalação fibra', 'retirada fibra', 'retirada wireless', 'instalação wireless',
     'troca de drop', 'troca de ont/onu/roteador', 'instalação de cabo de rede',
