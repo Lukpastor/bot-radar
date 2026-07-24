@@ -315,7 +315,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             resultado = await asyncio.wait_for(
                 asyncio.to_thread(processar_com_ia, texto_mensagem),
-                timeout=15.0
+                timeout=35.0
             )
         except asyncio.TimeoutError:
             try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_espera.message_id)
