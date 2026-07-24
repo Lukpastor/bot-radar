@@ -311,8 +311,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-        # IA Gemini em SEGUNDO PLANO (Evita o travamento da mensagem!)
-        resultado = await asyncio.to_thread(processar_com_ia, texto_mensagem)
+        # IA Gemini em SEGUNDO PLANO com Timeout (Cronômetro de 15s)
+        try:
+            resultado = await asyncio.wait_for(
+                asyncio.to_thread(processar_com_ia, texto_mensagem),
+                timeout=15.0
+            )
+        except asyncio.TimeoutError:
+            try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_espera.message_id)
+            except Exception: pass
+            await update.message.reply_text("⏳ A comunicação com o servidor da IA demorou muito (Timeout). Por favor, reenvie a O.S.")
+            return
         
         if not resultado.get("is_os", False) or not resultado.get("servicos"):
             try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_espera.message_id)
