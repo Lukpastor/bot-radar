@@ -19,7 +19,7 @@ def processar_com_ia(texto_os: str) -> dict:
         logger.error("GEMINI_API_KEY não configurada.")
         return {"is_os": False}
 
-   prompt = f"""
+    prompt = f"""
 Você é um assistente especialista em análise de Ordens de Serviço (O.S.) de provedores de internet.
 Sua tarefa é analisar o texto enviado pelo técnico e retornar um JSON estrito contendo:
 1. "is_os": true se for um relatório de serviço válido, false caso contrário.
@@ -67,8 +67,7 @@ Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        # Atualizado para o modelo padrão atual da API do Google
-        model = genai.GenerativeModel('gemini-3.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         
         texto_resposta = response.text.strip()
