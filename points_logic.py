@@ -33,11 +33,11 @@ Lista de serviços permitidos e seus pontos:
 Sinônimos e termos equivalentes para te ajudar a identificar os serviços:
 {json.dumps(sinonimos, ensure_ascii=False, indent=2)}
 
-🚨 REGRAS CRÍTICAS DE PONTUAÇÃO (EVITE DUPLICIDADE):
-- UMA O.S. GERALMENTE TEM APENAS UM SERVIÇO PRINCIPAL.
-- NUNCA misture "Reparo" com "Visita Improdutiva". Se o serviço foi realizado (reparo feito), é apenas Reparo. 
-- NUNCA duplique retiradas. Se o texto fala "retirada" e "retirado fibra", escolha apenas o serviço principal de retirada correspondente na lista e ignore o outro.
-- Se houver conflito entre termos parecidos, retorne APENAS um serviço (o mais importante e que melhor descreve a ação final do técnico).
+🚨 REGRAS CRÍTICAS DE PONTUAÇÃO (PROIBIDO MISTURAR QUALQUER SERVIÇO):
+- A O.S. DEVE TER APENAS UM ÚNICO SERVIÇO PRINCIPAL REGISTRADO. NUNCA retorne mais de um serviço na lista "servicos".
+- É TERMINANTEMENTE PROIBIDO acumular, somar ou misturar QUALQUER tipo de serviço. 
+- Se o texto do técnico mencionar várias palavras-chave diferentes (ex: reparo, mudança, instalação, visita, retirada), ESCOLHA APENAS O SERVIÇO MAIS IMPORTANTE/DE MAIOR VALOR e ignore completamente todos os outros.
+- A ação final definitiva que o técnico fez é a única que conta.
 
 Regras de formatação:
 - Retorne APENAS um objeto JSON válido, sem blocos de código em markdown (como ```json), sem texto antes e sem texto depois.
