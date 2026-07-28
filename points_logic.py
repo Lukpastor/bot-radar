@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import google.generativeai as genai
 from dotenv import load_dotenv
 from config import pontos_os, sinonimos, CATEGORIAS_ORDENADAS, logger
@@ -61,7 +62,7 @@ Texto: "...Instalação de fibra óptica realizada. Potência de RX: - 20 dbm...
 Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["instalacao"], "pontos": 2.0}}
 
 Regras de formatação finais:
-- Retorne APENAS um objeto JSON válido, sem blocos de código em markdown (como ```json), sem texto antes e sem texto depois.
+- Retorne APENAS um objeto JSON válido.
 
 Texto da O.S. para analisar:
 """ + texto_os
@@ -71,16 +72,20 @@ Texto da O.S. para analisar:
         response = model.generate_content(prompt)
         
         texto_resposta = response.text.strip()
+        logger.info(f"Resposta bruta da IA: {texto_resposta}")
         
-        # Remove eventuais marcações de markdown caso a IA coloque
-        if texto_resposta.startswith("```json"):
-            texto_resposta = texto_resposta[7:]
-        if texto_resposta.endswith("```"):
-            texto_resposta = texto_resposta[:-3]
-            
-        dados = json.loads(texto_resposta.strip())
-        return dados
+        # Limpeza robusta (remove formatações Markdown, se houver)
+        texto_limpo = texto_resposta.replace('```json', '').replace('```', '').strip()
+        
+        # Busca apenas a parte que é o JSON usando Expressão Regular
+        match = re.search(r'\{.*\}', texto_limpo, re.DOTALL)
+        if match:
+            dados = json.loads(match.group(0))
+            return dados
+        else:
+            logger.error("A IA não retornou um bloco de chaves JSON.")
+            return {"is_os": False}
 
     except Exception as e:
-        logger.error(f"Erro na nuvem do Gemini: {e}")
+        logger.error(f"Erro ao processar JSON ou na nuvem do Gemini: {e}")
         return {"is_os": False}
