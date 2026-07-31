@@ -60,8 +60,25 @@ Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        # Utilizando a versão latest do modelo 1.5 para máxima compatibilidade
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # === AUTO-DETECÇÃO DE MODELO ===
+        # Pede ao Google a lista de modelos que sua chave tem permissão para usar
+        nome_modelo = None
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                if 'flash' in m.name or 'pro' in m.name:
+                    nome_modelo = m.name.replace('models/', '')
+                    break
+        
+        # Se por acaso não achar um flash/pro, pega o primeiro da lista que funcionar
+        if not nome_modelo:
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    nome_modelo = m.name.replace('models/', '')
+                    break
+                    
+        logger.info(f"Modelo detectado e selecionado automaticamente: {nome_modelo}")
+        
+        model = genai.GenerativeModel(nome_modelo)
         response = model.generate_content(prompt)
         
         texto_resposta = response.text.strip()
