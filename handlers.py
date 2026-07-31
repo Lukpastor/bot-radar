@@ -78,7 +78,7 @@ async def ajuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️\n\n"
         f"🎯 <b>COMO USAR O BOT:</b>\n"
         f"Envie o texto do seu relatório de <b>O.S.</b> normalmente aqui no chat.\n"
-        f"<i>Eu leio o serviço, calculo os pontos e bloqueio duplicidades automaticamente!</i> 🚀\n\n"
+        f"<i>Eu leio o serviço, calculo os pontos!</i> 🚀\n\n"
         f"📊 <b>COMANDOS DA EQUIPE:</b>\n"
         f"▪️ <b>/pontos</b> - Ver seu saldo e total de O.S.\n"
         f"▪️ <b>/historico</b> - Últimas 10 O.S. registradas\n"
