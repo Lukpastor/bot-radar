@@ -14,96 +14,98 @@ if API_KEY:
 def processar_com_ia(texto_os: str) -> dict:
     """
     Usa a IA do Gemini para analisar o texto da O.S., extrair cliente,
-    serviços executados e calcular os pontos com base nas regras do config.py.
+    serviços executados e calcular os pontos.
     """
     if not API_KEY:
         logger.error("GEMINI_API_KEY não configurada.")
         return {"is_os": False}
 
     prompt = f"""
-Você é um assistente especialista em análise de Ordens de Serviço (O.S.) de provedores de internet.
-Sua tarefa é analisar o texto enviado pelo técnico e retornar um JSON estrito contendo:
+Você é um sistema de computador. Retorne APENAS um objeto JSON válido.
+Sua tarefa é analisar o texto enviado pelo técnico e retornar o JSON estrito contendo:
 1. "is_os": true se for um relatório de serviço válido.
-2. "cliente": O nome do cliente extraído do texto (se não achar, retorne "NÃO INFORMADO").
-3. "servicos": Uma lista contendo EXATAMENTE UM nome exato de serviço, baseando-se estritamente na lista de permitidos.
+2. "cliente": O nome do cliente extraído do texto.
+3. "servicos": Uma lista contendo EXATAMENTE UM nome exato de serviço.
 4. "pontos": A pontuação do único serviço escolhido.
 
 Lista de serviços permitidos e seus pontos:
 {json.dumps(pontos_os, ensure_ascii=False, indent=2)}
 
-Sinônimos e termos equivalentes para te ajudar a identificar os serviços:
+Sinônimos:
 {json.dumps(sinonimos, ensure_ascii=False, indent=2)}
 
-🚨 REGRAS CRÍTICAS DE ANÁLISE:
-1. IDENTIFICAÇÃO DE O.S.: Se o texto tiver dados como Nome do cliente, Potência de RX, Teste de velocidade ou OLT, É UMA O.S. VÁLIDA. Sempre retorne "is_os": true nestes casos, MESMO QUE O TEXTO ESTEJA CONFUSO.
-2. APENAS UM SERVIÇO: É proibido retornar mais de um serviço. Escolha apenas o serviço final real que o técnico executou.
-3. RESOLUÇÃO DE CONFLITOS: Se o técnico preencher "Tipo e suporte: Reparo", mas na descrição colocar "Visita improdutiva" ou "Não foi encontrado problema", A DESCRIÇÃO É A QUE VALE. O serviço final será "visita improdutiva". Se o suporte diz "Reparo" mas a descrição diz "Reinstalação externa realizada", o serviço final é "reinstalacao externa".
-
-=== GABARITO (EXEMPLOS DE COMO VOCÊ DEVE RESPONDER) ===
-
-Exemplo 1 (Contradição comum):
-Texto: "...Tipo e suporte: Reparo Fibra... Visita improdutiva. Não foi encontrado nenhum problema..."
-Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["visita improdutiva"], "pontos": 1.0}}
-
-Exemplo 2 (Contradição de Reparo e Reinstalação):
-Texto: "...Tipo e suporte: reparo... Reinstalação externa realizada. Potência de RX..."
-Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["reinstalacao externa"], "pontos": 2.0}}
-
-Exemplo 3 (Retirada):
-Texto: "...Foi realizado a retirada completa dos equipamentos em comodato..."
-Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["retirada"], "pontos": 1.0}}
-
-🚨 REGRA DE FORMATAÇÃO FINAL (ABSOLUTA E INQUEBRÁVEL):
-Você é um sistema de computador, não um assistente conversacional.
-É ESTRITAMENTE PROIBIDO escrever qualquer raciocínio, explicação, introdução ou passo a passo (Chain of Thought).
-A sua resposta DEVE começar OBRIGATORIAMENTE com a chave {{ e terminar com a chave }}, contendo APENAS o JSON válido e NADA MAIS.
+🚨 REGRAS CRÍTICAS:
+1. IDENTIFICAÇÃO DE O.S.: Se tiver dados como Nome, RX, Teste de velocidade ou OLT, É UMA O.S. VÁLIDA ("is_os": true).
+2. RESOLUÇÃO DE CONFLITOS: A descrição da O.S. sempre vence o cabeçalho se houver divergência de serviços.
 
 Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        # Pega a lista REAL de modelos que a Google liberou para esta chave específica
-        modelos_disponiveis = []
+        # Pega todos os modelos liberados pela Google
+        modelos_google = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                nome = m.name.replace('models/', '')
-                # Filtra apenas modelos de texto que costumam funcionar
-                if "vision" not in nome and "embedding" not in nome and "aqa" not in nome:
-                    modelos_disponiveis.append(nome)
+                modelos_google.append(m.name.replace('models/', ''))
+        
+        # === FILTRO DE PRIORIDADE ===
+        # Forçamos o código a testar PRIMEIRO os modelos Gemini puros que obedecem ao JSON
+        modelos_prioridade = [
+            'gemini-3.5-flash',
+            'gemini-flash-latest',
+            'gemini-pro-latest',
+            'gemini-3.1-flash-lite'
+        ]
+        
+        modelos_para_testar = []
+        
+        # 1. Adiciona os modelos prioritários (se estiverem liberados na sua chave)
+        for p in modelos_prioridade:
+            if p in modelos_google:
+                modelos_para_testar.append(p)
+                
+        # 2. Adiciona o resto, mas exclui os modelos "conversacionais" (gemma) e áudio/imagem puros
+        for m in modelos_google:
+            if m not in modelos_para_testar:
+                if "vision" not in m and "embedding" not in m and "aqa" not in m and "gemma" not in m and "tts" not in m:
+                    modelos_para_testar.append(m)
         
         response = None
         modelo_usado = None
         
-        # Tenta usar cada um dos modelos da lista que a Google devolveu
-        for nome_modelo in modelos_disponiveis:
+        # Testa a lista ordenada
+        for nome_modelo in modelos_para_testar:
             try:
                 model = genai.GenerativeModel(nome_modelo)
-                response = model.generate_content(prompt)
+                
+                # Força a entrega de JSON puro e zera a temperatura (sem criatividade)
+                response = model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.0,
+                        response_mime_type="application/json"
+                    )
+                )
                 modelo_usado = nome_modelo
-                break  # Se funcionou, sai do loop imediatamente!
+                break  # Funcionou! Sai do loop.
             except Exception as e:
-                logger.warning(f"Erro no modelo {nome_modelo}, ignorando... ({e})")
+                logger.warning(f"Erro no modelo {nome_modelo}, ignorando...")
                 continue
         
         if not response:
-            logger.error("A Google bloqueou ou não liberou modelos de texto para esta chave.")
+            logger.error("Nenhum modelo compatível com JSON foi encontrado.")
             return {"is_os": False}
             
         texto_resposta = response.text.strip()
         logger.info(f"Sucesso! IA processou usando [{modelo_usado}]. Resposta bruta: {texto_resposta}")
         
-        # Limpeza robusta (remove formatações Markdown, se houver)
-        texto_limpo = texto_resposta.replace('```json', '').replace('```', '').strip()
-        
-        # Busca apenas a parte que é o JSON usando Expressão Regular
-        match = re.search(r'\{.*\}', texto_limpo, re.DOTALL)
+        # Passa pelo filtro final
+        match = re.search(r'\{.*\}', texto_resposta, re.DOTALL)
         if match:
-            dados = json.loads(match.group(0))
-            return dados
+            return json.loads(match.group(0))
         else:
-            logger.error("A IA não retornou um bloco de chaves JSON.")
-            return {"is_os": False}
+            return json.loads(texto_resposta)
 
     except Exception as e:
-        logger.error(f"Erro geral no processamento da nuvem do Gemini: {e}")
+        logger.error(f"Erro geral no processamento: {e}")
         return {"is_os": False}
