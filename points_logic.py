@@ -1,6 +1,5 @@
 import os
 import json
-import re
 import google.generativeai as genai
 from dotenv import load_dotenv
 from config import pontos_os, sinonimos, CATEGORIAS_ORDENADAS, logger
@@ -104,12 +103,30 @@ Texto da O.S. para analisar:
         texto_resposta = response.text.strip()
         logger.info(f"Sucesso! IA processou usando [{modelo_usado}]. Resposta bruta: {texto_resposta}")
         
-        # Passa pelo filtro final de segurança para extrair o JSON
-        match = re.search(r'\{.*\}', texto_resposta, re.DOTALL)
-        if match:
-            dados = json.loads(match.group(0))
-        else:
-            dados = json.loads(texto_resposta)
+        # ==========================================
+        # LIMPADOR INTELIGENTE DE JSON
+        # ==========================================
+        texto_limpo = texto_resposta
+        
+        # Limpa possíveis blocos de formatação markdown
+        texto_limpo = texto_limpo.replace('```json', '').replace('```', '').strip()
+        
+        sucesso_json = False
+        dados = {}
+        
+        # Se a IA enviar chaves extras no final (ex: } }), ele vai cortando até o JSON ficar válido
+        while len(texto_limpo) > 0:
+            try:
+                dados = json.loads(texto_limpo)
+                sucesso_json = True
+                break  # Deu certo! Sai do loop de limpeza
+            except json.JSONDecodeError:
+                # Se falhar, remove o último caractere e tenta novamente
+                texto_limpo = texto_limpo[:-1].strip()
+                
+        if not sucesso_json:
+            logger.error("A IA retornou um texto que não pôde ser convertido para JSON válido.")
+            return {"is_os": False}
 
         # ==========================================
         # CÁLCULO DE PONTOS DETERMINÍSTICO (PYTHON) E VALIDAÇÃO
