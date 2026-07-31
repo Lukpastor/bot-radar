@@ -23,7 +23,7 @@ def processar_com_ia(texto_os: str) -> dict:
     prompt = f"""
 Você é um assistente especialista em análise de Ordens de Serviço (O.S.) de provedores de internet.
 Sua tarefa é analisar o texto enviado pelo técnico e retornar um JSON estrito contendo:
-1. "is_os": true se for um relatório de serviço válido, false caso contrário.
+1. "is_os": true se for um relatório de serviço válido.
 2. "cliente": O nome do cliente extraído do texto (se não achar, retorne "NÃO INFORMADO").
 3. "servicos": Uma lista contendo EXATAMENTE UM nome exato de serviço, baseando-se estritamente na lista de permitidos.
 4. "pontos": A pontuação do único serviço escolhido.
@@ -34,32 +34,24 @@ Lista de serviços permitidos e seus pontos:
 Sinônimos e termos equivalentes para te ajudar a identificar os serviços:
 {json.dumps(sinonimos, ensure_ascii=False, indent=2)}
 
-🚨 REGRAS CRÍTICAS DE PONTUAÇÃO (PROIBIDO MISTURAR QUALQUER SERVIÇO):
-- A O.S. DEVE TER APENAS UM ÚNICO SERVIÇO PRINCIPAL REGISTRADO. NUNCA retorne mais de um serviço na lista "servicos".
-- É TERMINANTEMENTE PROIBIDO acumular, somar ou misturar QUALQUER tipo de serviço. 
-- Se o texto do técnico mencionar várias palavras-chave diferentes (ex: reparo, mudança, instalação, visita, retirada), ESCOLHA APENAS O SERVIÇO MAIS IMPORTANTE/DE MAIOR VALOR e ignore completamente todos os outros.
+🚨 REGRAS CRÍTICAS DE ANÁLISE:
+1. IDENTIFICAÇÃO DE O.S.: Se o texto tiver dados como Nome do cliente, Potência de RX, Teste de velocidade ou OLT, É UMA O.S. VÁLIDA. Sempre retorne "is_os": true nestes casos, MESMO QUE O TEXTO ESTEJA CONFUSO.
+2. APENAS UM SERVIÇO: É proibido retornar mais de um serviço. Escolha apenas o serviço final real que o técnico executou.
+3. RESOLUÇÃO DE CONFLITOS: Se o técnico preencher "Tipo e suporte: Reparo", mas na descrição colocar "Visita improdutiva" ou "Não foi encontrado problema", A DESCRIÇÃO É A QUE VALE. O serviço final será "visita improdutiva". Se o suporte diz "Reparo" mas a descrição diz "Reinstalação externa realizada", o serviço final é "reinstalacao externa".
 
 === GABARITO (EXEMPLOS DE COMO VOCÊ DEVE RESPONDER) ===
 
-Exemplo 1 (Retirada de equipamento):
-Texto: "...Foi realizado a retirada completa dos equipamentos em comodato. O conector foi retirado da caixa."
-Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["retirada"], "pontos": 1.0}}
-
-Exemplo 2 (Visita Improdutiva):
-Texto: "...Visita improdutiva. Cabos estavam mal encaixados... O problema foi solucionado e o cliente orientado..."
+Exemplo 1 (Contradição comum):
+Texto: "...Tipo e suporte: Reparo Fibra... Visita improdutiva. Não foi encontrado nenhum problema..."
 Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["visita improdutiva"], "pontos": 1.0}}
 
-Exemplo 3 (Reparo):
-Texto: "...Conector estava danificado e foi realizado a troca. Potência de RX..."
-Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["reparo"], "pontos": 1.0}}
+Exemplo 2 (Contradição de Reparo e Reinstalação):
+Texto: "...Tipo e suporte: reparo... Reinstalação externa realizada. Potência de RX..."
+Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["reinstalacao externa"], "pontos": 2.0}}
 
-Exemplo 4 (Mudança de Endereço sem sucesso / Retirada):
-Texto: "...Não foi possível realizar a mudança de endereço por inviabilidade técnica... Foi retirado conector rápido da caixa."
+Exemplo 3 (Retirada):
+Texto: "...Foi realizado a retirada completa dos equipamentos em comodato..."
 Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["retirada"], "pontos": 1.0}}
-
-Exemplo 5 (Instalação):
-Texto: "...Instalação de fibra óptica realizada. Potência de RX: - 20 dbm..."
-Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["instalacao"], "pontos": 2.0}}
 
 Regras de formatação finais:
 - Retorne APENAS um objeto JSON válido.
@@ -68,7 +60,8 @@ Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # Utilizando a versão latest do modelo 1.5 para máxima compatibilidade
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content(prompt)
         
         texto_resposta = response.text.strip()
