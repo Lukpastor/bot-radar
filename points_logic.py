@@ -60,30 +60,34 @@ Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        # === ESCADA DE TENTATIVAS ===
-        # Lista dos modelos mais estáveis, ignorando o 2.5 que está bloqueado para sua conta
-        modelos_seguros = [
-            'gemini-1.5-flash',
-            'gemini-1.5-pro',
-            'gemini-1.0-pro'
-        ]
+        # Pega a lista REAL de modelos que a Google liberou para esta chave específica
+        modelos_disponiveis = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                nome = m.name.replace('models/', '')
+                # Filtra apenas modelos de texto que costumam funcionar
+                if "vision" not in nome and "embedding" not in nome and "aqa" not in nome:
+                    modelos_disponiveis.append(nome)
+        
+        logger.info(f"Modelos reais liberados pela Google para sua chave: {modelos_disponiveis}")
         
         response = None
         modelo_usado = None
         
-        for nome_modelo in modelos_seguros:
+        # Tenta usar cada um dos modelos da lista que a Google devolveu
+        for nome_modelo in modelos_disponiveis:
             try:
                 logger.info(f"Tentando usar o modelo: {nome_modelo}")
                 model = genai.GenerativeModel(nome_modelo)
                 response = model.generate_content(prompt)
                 modelo_usado = nome_modelo
-                break  # Se deu certo e não deu erro 404, para o loop!
+                break  # Se funcionou, sai do loop imediatamente!
             except Exception as e:
-                logger.warning(f"Erro no modelo {nome_modelo}, tentando o próximo... ({e})")
-                continue  # Tenta o próximo da lista
+                logger.warning(f"Erro no modelo {nome_modelo}, ignorando... ({e})")
+                continue
         
         if not response:
-            logger.error("Todos os modelos seguros falharam. Verifique sua chave de API.")
+            logger.error("A Google bloqueou ou não liberou modelos de texto para esta chave.")
             return {"is_os": False}
             
         texto_resposta = response.text.strip()
