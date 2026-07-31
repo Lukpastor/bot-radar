@@ -13,13 +13,12 @@ if API_KEY:
 def processar_com_ia(texto_os: str) -> dict:
     """
     Usa a IA do Gemini para analisar o texto da O.S. e extrair cliente e serviço.
-    A pontuação é calculada de forma determinística pelo Python, com validação estrita.
+    Versão Otimizada: Sem chamadas extras de lista para evitar Timeout no Telegram.
     """
     if not API_KEY:
         logger.error("GEMINI_API_KEY não configurada.")
         return {"is_os": False}
 
-    # Passamos apenas as chaves (nomes dos serviços) para a IA, sem os valores numéricos
     nomes_servicos_permitidos = list(pontos_os.keys())
 
     prompt = f"""
@@ -46,43 +45,24 @@ Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        # Pega todos os modelos liberados pela Google para a sua chave
-        modelos_google = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                modelos_google.append(m.name.replace('models/', ''))
-        
-        # === FILTRO DE PRIORIDADE ===
-        # Forçamos o código a testar PRIMEIRO os modelos Gemini puros que obedecem ao JSON
-        modelos_prioridade = [
+        # === MODO TURBO ATIVADO ===
+        # Removemos a busca demorada (list_models).
+        # Vamos direto para os modelos que sabemos que funcionam na sua chave, na ordem de velocidade.
+        modelos_para_testar = [
             'gemini-3.5-flash',
             'gemini-flash-latest',
-            'gemini-pro-latest',
-            'gemini-3.1-flash-lite'
+            'gemini-pro-latest'
         ]
-        
-        modelos_para_testar = []
-        
-        # 1. Adiciona os modelos prioritários (se estiverem liberados na sua chave)
-        for p in modelos_prioridade:
-            if p in modelos_google:
-                modelos_para_testar.append(p)
-                
-        # 2. Adiciona o resto, mas exclui os modelos "conversacionais" (gemma) e áudio/imagem puros
-        for m in modelos_google:
-            if m not in modelos_para_testar:
-                if "vision" not in m and "embedding" not in m and "aqa" not in m and "gemma" not in m and "tts" not in m:
-                    modelos_para_testar.append(m)
         
         response = None
         modelo_usado = None
         
-        # Testa a lista ordenada
+        # Testa a lista estática diretamente
         for nome_modelo in modelos_para_testar:
             try:
                 model = genai.GenerativeModel(nome_modelo)
                 
-                # Força a entrega de JSON puro e zera a temperatura (sem criatividade/alucinação)
+                # Força a entrega de JSON puro e zera a temperatura
                 response = model.generate_content(
                     prompt,
                     generation_config=genai.types.GenerationConfig(
@@ -93,11 +73,11 @@ Texto da O.S. para analisar:
                 modelo_usado = nome_modelo
                 break  # Funcionou! Sai do loop.
             except Exception as e:
-                logger.warning(f"Erro no modelo {nome_modelo}, ignorando...")
+                logger.warning(f"Erro no modelo {nome_modelo}, ignorando... ({e})")
                 continue
         
         if not response:
-            logger.error("Nenhum modelo compatível com JSON foi encontrado.")
+            logger.error("Nenhum modelo estático respondeu a tempo ou foi aceito.")
             return {"is_os": False}
             
         texto_resposta = response.text.strip()
@@ -106,51 +86,39 @@ Texto da O.S. para analisar:
         # ==========================================
         # EXTRAÇÃO E VALIDAÇÃO ESTRUTURAL DE JSON
         # ==========================================
-        # Limpa possíveis blocos de formatação markdown
         texto_limpo = texto_resposta.replace('```json', '').replace('```', '').strip()
         
         try:
-            # Localiza onde o JSON realmente começa
             start_idx = texto_limpo.find('{')
             if start_idx == -1:
-                logger.error("Nenhum caractere '{' encontrado na resposta da IA.")
                 return {"is_os": False}
                 
             texto_para_parse = texto_limpo[start_idx:]
             
-            # O raw_decode extrai APENAS o JSON válido e ignora caracteres extras (como '}') no final
             decoder = json.JSONDecoder()
             dados, _ = decoder.raw_decode(texto_para_parse)
             
-            # Validação rigorosa da estrutura
             if not isinstance(dados, dict):
-                logger.error("A estrutura retornada não é um objeto JSON válido.")
                 return {"is_os": False}
                 
             chaves_esperadas = ["is_os", "cliente", "servicos"]
             if not all(chave in dados for chave in chaves_esperadas):
-                logger.error(f"O JSON não possui todas as chaves obrigatórias. Chaves presentes: {list(dados.keys())}")
                 return {"is_os": False}
                 
-        except json.JSONDecodeError as e:
-            logger.error(f"Falha crítica na decodificação do JSON: {e}")
-            return {"is_os": False}
         except Exception as e:
-            logger.error(f"Erro inesperado durante a validação da estrutura: {e}")
+            logger.error(f"Falha na validação do JSON: {e}")
             return {"is_os": False}
 
         # ==========================================
-        # CÁLCULO DE PONTOS DETERMINÍSTICO (PYTHON) E VALIDAÇÃO
+        # CÁLCULO DE PONTOS DETERMINÍSTICO (PYTHON)
         # ==========================================
         if dados.get("is_os") and dados.get("servicos"):
-            nome_servico = dados["servicos"][0].strip() # Limpa espaços extras
+            nome_servico = dados["servicos"][0].strip()
 
-            # Trava de segurança: verifica se o serviço realmente existe no seu dicionário
             if nome_servico not in pontos_os:
                 logger.warning(f"Serviço inválido retornado pela IA: {nome_servico}")
                 return {"is_os": False}
 
-            # Atribui a pontuação com segurança total
             dados["pontos"] = pontos_os[nome_servico]
         else:
             dados["pontos"] = 0.0
