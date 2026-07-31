@@ -60,29 +60,34 @@ Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        # === AUTO-DETECÇÃO DE MODELO ===
-        # Pede ao Google a lista de modelos que sua chave tem permissão para usar
-        nome_modelo = None
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                if 'flash' in m.name or 'pro' in m.name:
-                    nome_modelo = m.name.replace('models/', '')
-                    break
+        # === ESCADA DE TENTATIVAS ===
+        # Lista dos modelos mais estáveis, ignorando o 2.5 que está bloqueado para sua conta
+        modelos_seguros = [
+            'gemini-1.5-flash',
+            'gemini-1.5-pro',
+            'gemini-1.0-pro'
+        ]
         
-        # Se por acaso não achar um flash/pro, pega o primeiro da lista que funcionar
-        if not nome_modelo:
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    nome_modelo = m.name.replace('models/', '')
-                    break
-                    
-        logger.info(f"Modelo detectado e selecionado automaticamente: {nome_modelo}")
+        response = None
+        modelo_usado = None
         
-        model = genai.GenerativeModel(nome_modelo)
-        response = model.generate_content(prompt)
+        for nome_modelo in modelos_seguros:
+            try:
+                logger.info(f"Tentando usar o modelo: {nome_modelo}")
+                model = genai.GenerativeModel(nome_modelo)
+                response = model.generate_content(prompt)
+                modelo_usado = nome_modelo
+                break  # Se deu certo e não deu erro 404, para o loop!
+            except Exception as e:
+                logger.warning(f"Erro no modelo {nome_modelo}, tentando o próximo... ({e})")
+                continue  # Tenta o próximo da lista
         
+        if not response:
+            logger.error("Todos os modelos seguros falharam. Verifique sua chave de API.")
+            return {"is_os": False}
+            
         texto_resposta = response.text.strip()
-        logger.info(f"Resposta bruta da IA: {texto_resposta}")
+        logger.info(f"Sucesso! IA processou usando [{modelo_usado}]. Resposta bruta: {texto_resposta}")
         
         # Limpeza robusta (remove formatações Markdown, se houver)
         texto_limpo = texto_resposta.replace('```json', '').replace('```', '').strip()
@@ -97,5 +102,5 @@ Texto da O.S. para analisar:
             return {"is_os": False}
 
     except Exception as e:
-        logger.error(f"Erro ao processar JSON ou na nuvem do Gemini: {e}")
+        logger.error(f"Erro geral no processamento da nuvem do Gemini: {e}")
         return {"is_os": False}
