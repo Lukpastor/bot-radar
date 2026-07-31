@@ -104,28 +104,39 @@ Texto da O.S. para analisar:
         logger.info(f"Sucesso! IA processou usando [{modelo_usado}]. Resposta bruta: {texto_resposta}")
         
         # ==========================================
-        # LIMPADOR INTELIGENTE DE JSON
+        # EXTRAÇÃO E VALIDAÇÃO ESTRUTURAL DE JSON
         # ==========================================
-        texto_limpo = texto_resposta
-        
         # Limpa possíveis blocos de formatação markdown
-        texto_limpo = texto_limpo.replace('```json', '').replace('```', '').strip()
+        texto_limpo = texto_resposta.replace('```json', '').replace('```', '').strip()
         
-        sucesso_json = False
-        dados = {}
-        
-        # Se a IA enviar chaves extras no final (ex: } }), ele vai cortando até o JSON ficar válido
-        while len(texto_limpo) > 0:
-            try:
-                dados = json.loads(texto_limpo)
-                sucesso_json = True
-                break  # Deu certo! Sai do loop de limpeza
-            except json.JSONDecodeError:
-                # Se falhar, remove o último caractere e tenta novamente
-                texto_limpo = texto_limpo[:-1].strip()
+        try:
+            # Localiza onde o JSON realmente começa
+            start_idx = texto_limpo.find('{')
+            if start_idx == -1:
+                logger.error("Nenhum caractere '{' encontrado na resposta da IA.")
+                return {"is_os": False}
                 
-        if not sucesso_json:
-            logger.error("A IA retornou um texto que não pôde ser convertido para JSON válido.")
+            texto_para_parse = texto_limpo[start_idx:]
+            
+            # O raw_decode extrai APENAS o JSON válido e ignora caracteres extras (como '}') no final
+            decoder = json.JSONDecoder()
+            dados, _ = decoder.raw_decode(texto_para_parse)
+            
+            # Validação rigorosa da estrutura
+            if not isinstance(dados, dict):
+                logger.error("A estrutura retornada não é um objeto JSON válido.")
+                return {"is_os": False}
+                
+            chaves_esperadas = ["is_os", "cliente", "servicos"]
+            if not all(chave in dados for chave in chaves_esperadas):
+                logger.error(f"O JSON não possui todas as chaves obrigatórias. Chaves presentes: {list(dados.keys())}")
+                return {"is_os": False}
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"Falha crítica na decodificação do JSON: {e}")
+            return {"is_os": False}
+        except Exception as e:
+            logger.error(f"Erro inesperado durante a validação da estrutura: {e}")
             return {"is_os": False}
 
         # ==========================================
