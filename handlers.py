@@ -74,32 +74,70 @@ async def ajuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Mensagem base para todos os usuários (Técnicos)
     mensagem = (
-        f"👋 Olá, <b>{user.first_name}</b>!\n"
-        f"〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️\n\n"
-        f"🎯 <b>COMO USAR O BOT:</b>\n"
-        f"Envie o texto do seu relatório de <b>O.S.</b> normalmente aqui no chat.\n"
-        f"<i>Eu leio o serviço, calculo os pontos!</i> 🚀\n\n"
-        f"📊 <b>COMANDOS DA EQUIPE:</b>\n"
-        f"▪️ <b>/pontos</b> - Ver seu saldo e total de O.S.\n"
-        f"▪️ <b>/historico</b> - Últimas 10 O.S. registradas\n"
-        f"▪️ <b>/ranking</b> - Placar de técnicos do mês\n"
-        f"▪️ <b>/excluir_ultima</b> - Apaga a ÚLTIMA O.S. enviada\n"
-        f"▪️ <b>/ajuda</b> - Exibe este menu\n"
+        f"👋 <b>Olá, {user.first_name}!</b>\n"
+        f"╔══════════════════════╗\n"
+        f"   🤖 <b>BOT DE PONTUAÇÃO</b>\n"
+        f"╚══════════════════════╝\n\n"
+
+        f"📌 <b>COMO FUNCIONA</b>\n"
+        f"────────────────────\n"
+        f"📝 Envie o relatório da <b>O.S.</b> normalmente no chat.\n"
+        f"⚡ O bot identifica o serviço, calcula os pontos e registra automaticamente.\n\n"
+
+        f"👨‍🔧 <b>PAINEL DO TÉCNICO</b>\n"
+        f"────────────────────\n"
+        f"📊 <b>/pontos</b>\n"
+        f"   └ Ver saldo de pontos e quantidade de O.S.\n\n"
+
+        f"📜 <b>/historico</b>\n"
+        f"   └ Últimas 10 O.S. registradas.\n\n"
+
+        f"🏆 <b>/ranking</b>\n"
+        f"   └ Ranking dos técnicos do mês.\n\n"
+
+        f"🗑️ <b>/excluir_ultima</b>\n"
+        f"   └ Remove a última O.S. enviada.\n\n"
+
+        f"❓ <b>/ajuda</b>\n"
+        f"   └ Exibe este painel novamente."
     )
 
-    # Verifica se é o dono ou um supervisor para exibir os botões extras
     if await is_supervisor(user_id):
         mensagem += (
-            f"\n🛡️ <b>COMANDOS DA CHEFIA:</b>\n"
-            f"🔸 <b>/consultar_cliente</b> <i>&lt;nome&gt;</i> - Histórico do cliente\n"
-            f"🔸 <b>/exportar</b> - Gera planilha Excel do mês\n"
-            f"🔸 <b>/add</b> <i>&lt;ID&gt; [cargo]</i> - Novo usuário (Ex: /add 123 admin)\n"
-            f"🔸 <b>/delet</b> <i>&lt;ID&gt;</i> - Remove acesso de usuário\n"
-            f"🔸 <b>/apagar_usuario</b> <i>&lt;ID&gt;</i> - Exclui usuário e TUDO dele ⚠️\n"
-            f"🔸 <b>/apagar_os</b> <i>&lt;ID_OS&gt;</i> - Exclui O.S. via ID\n"
-            f"🔸 <b>/forcar_os</b> <i>&lt;pontos&gt; &lt;serv&gt;</i> - (Responda à O.S. do técnico com isso)"
+            f"\n\n"
+            f"🛡️ <b>PAINEL DA SUPERVISÃO</b>\n"
+            f"────────────────────\n"
+
+            f"👤 <b>/consultar_cliente &lt;nome&gt;</b>\n"
+            f"   └ Consulta o histórico do cliente.\n\n"
+
+            f"📁 <b>/exportar</b>\n"
+            f"   └ Exporta a planilha Excel do mês.\n\n"
+
+            f"➕ <b>/add &lt;ID&gt; [cargo]</b>\n"
+            f"   └ Adiciona um novo usuário.\n"
+            f"   └ Ex.: <code>/add 123456 admin</code>\n\n"
+
+            f"➖ <b>/delet &lt;ID&gt;</b>\n"
+            f"   └ Remove o acesso de um usuário.\n\n"
+
+            f"🚫 <b>/apagar_usuario &lt;ID&gt;</b>\n"
+            f"   └ Exclui o usuário e todos os seus registros.\n\n"
+
+            f"🗑️ <b>/apagar_os &lt;ID_OS&gt;</b>\n"
+            f"   └ Exclui uma O.S. pelo ID.\n\n"
+
+            f"🎯 <b>/forcar_os &lt;pontos&gt; &lt;serviço&gt;</b>\n"
+            f"   └ Utilize respondendo à mensagem da O.S."
         )
 
+    mensagem += (
+        f"\n\n"
+        f"══════════════════════\n"
+        f"💡 <i>Dica:</i> Basta enviar o texto da O.S.\n"
+        f"🤖 O restante é feito automaticamente.\n"
+        f"══════════════════════"
+    )
     await update.message.reply_text(mensagem, parse_mode='HTML')
 
 async def pontos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -286,6 +324,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not await verificar_usuario(user_id): return
     texto_mensagem = update.message.text
+
+    # ==========================================
+    # PORTEIRO (GATEKEEPER) - IGNORA BATE-PAPO
+    # ==========================================
+    # Ignora se for muito curto E não contiver palavras-chave típicas de telecom.
+    # Ex: Impede que mensagens como "Lucas" ou "Pontos" acionem a IA e causem Timeout.
+    texto_lower = texto_mensagem.lower()
+    palavras_chave_os = ['cliente', 'os', 'olt', 'mac', 'rx', 'potência', 'velocidade', 'sinal']
+    
+    if len(texto_mensagem) < 30 and not any(palavra in texto_lower for palavra in palavras_chave_os):
+        # A mensagem é bate-papo irrelevante, o bot sai da função sem fazer nada
+        return
+    # ==========================================
+
     msg_espera = await update.message.reply_text("⏳ <i>Processando O.S...</i>", parse_mode='HTML')
 
     try:
@@ -311,7 +363,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-        # IA Gemini em SEGUNDO PLANO com Timeout (Cronômetro de 15s)
+        # IA Gemini em SEGUNDO PLANO com Timeout (Cronômetro de 35s)
         try:
             resultado = await asyncio.wait_for(
                 asyncio.to_thread(processar_com_ia, texto_mensagem),
