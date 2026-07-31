@@ -68,7 +68,7 @@ Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         
         texto_resposta = response.text.strip()
