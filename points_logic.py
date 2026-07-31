@@ -53,8 +53,10 @@ Exemplo 3 (Retirada):
 Texto: "...Foi realizado a retirada completa dos equipamentos em comodato..."
 Sua Resposta: {{"is_os": true, "cliente": "Nome do Cliente", "servicos": ["retirada"], "pontos": 1.0}}
 
-Regras de formatação finais:
-- Retorne APENAS um objeto JSON válido.
+🚨 REGRA DE FORMATAÇÃO FINAL (ABSOLUTA E INQUEBRÁVEL):
+Você é um sistema de computador, não um assistente conversacional.
+É ESTRITAMENTE PROIBIDO escrever qualquer raciocínio, explicação, introdução ou passo a passo (Chain of Thought).
+A sua resposta DEVE começar OBRIGATORIAMENTE com a chave {{ e terminar com a chave }}, contendo APENAS o JSON válido e NADA MAIS.
 
 Texto da O.S. para analisar:
 """ + texto_os
@@ -69,15 +71,12 @@ Texto da O.S. para analisar:
                 if "vision" not in nome and "embedding" not in nome and "aqa" not in nome:
                     modelos_disponiveis.append(nome)
         
-        logger.info(f"Modelos reais liberados pela Google para sua chave: {modelos_disponiveis}")
-        
         response = None
         modelo_usado = None
         
         # Tenta usar cada um dos modelos da lista que a Google devolveu
         for nome_modelo in modelos_disponiveis:
             try:
-                logger.info(f"Tentando usar o modelo: {nome_modelo}")
                 model = genai.GenerativeModel(nome_modelo)
                 response = model.generate_content(prompt)
                 modelo_usado = nome_modelo
