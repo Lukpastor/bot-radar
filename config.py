@@ -1,14 +1,45 @@
+import os
 import logging
+from dotenv import load_dotenv
+
+
+# ==========================================
+# VARIÁVEIS DE AMBIENTE
+# ==========================================
+
+# Localmente, lê o arquivo .env.
+# No Railway, as variáveis são carregadas
+# automaticamente pelo painel Variables.
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN não encontrado nas variáveis de ambiente."
+    )
+
+if not GEMINI_API_KEY:
+    logging.warning(
+        "GEMINI_API_KEY não encontrada nas variáveis de ambiente."
+    )
+
 
 # ==========================================
 # CONFIGURAÇÃO DE LOGS
 # ==========================================
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    level=logging.INFO,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Reduz logs repetitivos do Telegram/httpx
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 # ==========================================
@@ -227,8 +258,7 @@ sinonimos = {
         "servico reativado",
         "fibra reativada",
     ],
-
-    # ======================================
+        # ======================================
     # MUDANÇA DE ENDEREÇO
     # ======================================
     "mudança de endereço": [
@@ -513,6 +543,17 @@ sinonimos = {
     ],
 
     # ======================================
+    # SUPORTE EXTRA
+    # ======================================
+    "suporte extra": [
+        "suporte extra",
+        "atendimento extra",
+        "apoio adicional",
+        "serviço adicional",
+        "servico adicional",
+        "suporte adicional",
+    ],
+        # ======================================
     # INFRA - INSTALAÇÃO
     # ======================================
     "infra - instalação": [
@@ -654,8 +695,6 @@ sinonimos = {
         "apenas deslocamento de infraestrutura",
     ],
 }
-
-
 # ==========================================
 # ORDEM DE PRIORIDADE PARA CLASSIFICAÇÃO
 # ==========================================
@@ -698,7 +737,7 @@ CATEGORIAS_ORDENADAS = [
 # ==========================================
 # VALIDAÇÃO AUTOMÁTICA DA CONFIGURAÇÃO
 # ==========================================
-def validar_configuracao():
+def validar_configuracao() -> None:
     """
     Verifica inconsistências entre:
     - pontos_os
@@ -712,57 +751,105 @@ def validar_configuracao():
 
     erros_encontrados = False
 
-    # Categorias de sinônimos sem pontuação
+    # --------------------------------------
+    # SINÔNIMOS SEM PONTUAÇÃO
+    # --------------------------------------
     sinonimos_sem_pontuacao = (
         categorias_sinonimos - categorias_pontos
     )
 
     for categoria in sorted(sinonimos_sem_pontuacao):
         logger.warning(
-            f"Categoria de sinônimo não existe em pontos_os: "
+            "Categoria de sinônimo não existe em pontos_os: "
             f"{categoria!r}"
         )
         erros_encontrados = True
 
-    # Categorias ordenadas sem pontuação
+    # --------------------------------------
+    # CATEGORIAS ORDENADAS SEM PONTUAÇÃO
+    # --------------------------------------
     ordenadas_sem_pontuacao = (
         categorias_ordenadas - categorias_pontos
     )
 
     for categoria in sorted(ordenadas_sem_pontuacao):
         logger.warning(
-            f"Categoria de CATEGORIAS_ORDENADAS não existe "
+            "Categoria de CATEGORIAS_ORDENADAS não existe "
             f"em pontos_os: {categoria!r}"
         )
         erros_encontrados = True
 
-    # Categorias com pontuação, mas sem sinônimos
+    # --------------------------------------
+    # PONTUAÇÕES SEM SINÔNIMOS
+    # --------------------------------------
     categorias_sem_sinonimos = (
         categorias_pontos - categorias_sinonimos
     )
 
     for categoria in sorted(categorias_sem_sinonimos):
         logger.info(
-            f"Categoria de pontos sem lista de sinônimos: "
+            "Categoria de pontos sem lista de sinônimos: "
             f"{categoria!r}"
         )
 
-    # Categorias com pontuação, mas fora da ordem
+    # --------------------------------------
+    # PONTUAÇÕES FORA DA ORDEM
+    # --------------------------------------
     categorias_fora_da_ordem = (
         categorias_pontos - categorias_ordenadas
     )
 
     for categoria in sorted(categorias_fora_da_ordem):
         logger.info(
-            f"Categoria de pontos não incluída em "
+            "Categoria de pontos não incluída em "
             f"CATEGORIAS_ORDENADAS: {categoria!r}"
         )
 
-    if not erros_encontrados:
+    # --------------------------------------
+    # VALIDAÇÃO DAS LISTAS DE SINÔNIMOS
+    # --------------------------------------
+    for categoria, lista_sinonimos in sinonimos.items():
+        if not isinstance(lista_sinonimos, list):
+            logger.warning(
+                f"Os sinônimos de {categoria!r} não são uma lista."
+            )
+            erros_encontrados = True
+            continue
+
+        if not lista_sinonimos:
+            logger.warning(
+                f"A categoria {categoria!r} possui lista vazia."
+            )
+
+        sinonimos_normalizados = [
+            str(item).strip().lower()
+            for item in lista_sinonimos
+            if str(item).strip()
+        ]
+
+        duplicados = {
+            item
+            for item in sinonimos_normalizados
+            if sinonimos_normalizados.count(item) > 1
+        }
+
+        if duplicados:
+            logger.info(
+                f"Sinônimos duplicados em {categoria!r}: "
+                f"{sorted(duplicados)!r}"
+            )
+
+    if erros_encontrados:
+        logger.warning(
+            "A configuração possui inconsistências. "
+            "Verifique os avisos acima."
+        )
+    else:
         logger.info(
-            "Configuração de pontos e sinônimos validada com sucesso."
+            "Configuração de pontos e sinônimos "
+            "validada com sucesso."
         )
 
 
-# Executa a validação ao importar o arquivo
+# Executa a validação quando o config.py for importado
 validar_configuracao()
