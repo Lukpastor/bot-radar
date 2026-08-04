@@ -1,22 +1,27 @@
 import os
 import json
-import google.generativeai as genai
 from dotenv import load_dotenv
 from config import pontos_os, sinonimos, CATEGORIAS_ORDENADAS, logger
+
+# NOVO PACOTE DA GOOGLE
+from google import genai
+from google.genai import types
 
 load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 if API_KEY:
-    genai.configure(api_key=API_KEY)
+    client = genai.Client(api_key=API_KEY)
+else:
+    client = None
+    logger.error("GEMINI_API_KEY não configurada no arquivo .env!")
 
 def processar_com_ia(texto_os: str) -> dict:
     """
     Usa a IA do Gemini para analisar o texto da O.S. e extrair cliente e serviço.
-    Versão Otimizada: Sem chamadas extras de lista para evitar Timeout no Telegram.
+    Versão Otimizada com a nova biblioteca google.genai e modelos fallback.
     """
-    if not API_KEY:
-        logger.error("GEMINI_API_KEY não configurada.")
+    if not client:
         return {"is_os": False}
 
     nomes_servicos_permitidos = list(pontos_os.keys())
@@ -45,27 +50,23 @@ Texto da O.S. para analisar:
 """ + texto_os
 
     try:
-        # === MODO TURBO ATIVADO ===
-        # Removemos a busca demorada (list_models).
-        # Vamos direto para os modelos que sabemos que funcionam na sua chave, na ordem de velocidade.
+        # Modelos atualizados e à prova de falhas para testar
         modelos_para_testar = [
             'gemini-3.5-flash',
-            'gemini-flash-latest',
-            'gemini-pro-latest'
+            'gemini-1.5-flash', # Excelente plano B (muito rápido e estável)
+            'gemini-1.5-pro'    # Plano C (mais robusto, caso tudo falhe)
         ]
         
         response = None
         modelo_usado = None
         
-        # Testa a lista estática diretamente
         for nome_modelo in modelos_para_testar:
             try:
-                model = genai.GenerativeModel(nome_modelo)
-                
-                # Força a entrega de JSON puro e zera a temperatura
-                response = model.generate_content(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
+                # NOVA FORMA DE CHAMAR A GOOGLE
+                response = client.models.generate_content(
+                    model=nome_modelo,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
                         temperature=0.0,
                         response_mime_type="application/json"
                     )
@@ -113,7 +114,8 @@ Texto da O.S. para analisar:
         # CÁLCULO DE PONTOS DETERMINÍSTICO (PYTHON)
         # ==========================================
         if dados.get("is_os") and dados.get("servicos"):
-            nome_servico = dados["servicos"][0].strip()
+            # AQUI ESTÁ A CORREÇÃO (.lower()) PARA NÃO RECUSAR LETRAS MAIÚSCULAS
+            nome_servico = dados["servicos"][0].strip().lower()
 
             if nome_servico not in pontos_os:
                 logger.warning(f"Serviço inválido retornado pela IA: {nome_servico}")
