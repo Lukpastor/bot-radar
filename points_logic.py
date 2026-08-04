@@ -811,6 +811,20 @@ def processar_com_ia(
     servico_local = detectar_servico_localmente(
         texto_os
     )
+    
+    cliente_local = extrair_cliente_localmente(
+        texto_os
+    )
+
+    # ==========================================
+    # SUPER OTIMIZAÇÃO: BYPASS DA IA
+    # ==========================================
+    if servico_local and cliente_local and cliente_local != "NÃO INFORMADO":
+        logger.info("Bypass da IA ativado! Respondendo instantaneamente via processamento local.")
+        return processar_localmente(
+            texto_os,
+            servico_local,
+        )
 
     # Sem chave Gemini, ainda tenta processar localmente.
     if not client:
