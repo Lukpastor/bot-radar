@@ -2,29 +2,78 @@ import os
 import re
 import json
 import unicodedata
+from typing import Any
+
 from dotenv import load_dotenv
-
-from config import pontos_os, sinonimos, CATEGORIAS_ORDENADAS, logger
-
 from google import genai
 from google.genai import types
 
+from config import (
+    pontos_os,
+    sinonimos,
+    CATEGORIAS_ORDENADAS,
+    logger,
+)
 
+
+# ==========================================
+# CONFIGURAÇÃO
+# ==========================================
 load_dotenv()
 
 API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Você pode substituir no .env:
+#
+# GEMINI_MODELS=gemini-3.5-flash-lite,gemini-3.6-flash
+#
+MODELOS_ENV = os.getenv(
+    "GEMINI_MODELS",
+    "gemini-3.5-flash-lite,gemini-3.6-flash",
+)
+
+MODELOS_PREFERIDOS = [
+    modelo.strip()
+    for modelo in MODELOS_ENV.split(",")
+    if modelo.strip()
+]
 
 if API_KEY:
     client = genai.Client(api_key=API_KEY)
 else:
     client = None
-    logger.error("GEMINI_API_KEY não configurada no arquivo .env!")
+    logger.error(
+        "GEMINI_API_KEY não configurada no arquivo .env!"
+    )
 
 
-def normalizar_texto(texto: str) -> str:
+# ==========================================
+# RESULTADO PADRÃO
+# ==========================================
+def criar_resultado_padrao(
+    erro: str | None = None,
+) -> dict[str, Any]:
+    resultado = {
+        "is_os": False,
+        "cliente": "",
+        "servicos": [],
+        "pontos": 0.0,
+    }
+
+    if erro:
+        resultado["erro"] = erro
+
+    return resultado
+
+
+# ==========================================
+# NORMALIZAÇÃO DE TEXTO
+# ==========================================
+def normalizar_texto(texto: Any) -> str:
     """
-    Padroniza texto para facilitar comparações:
-    - coloca em minúsculas;
+    Normaliza textos para comparação:
+
+    - converte para minúsculas;
     - remove acentos;
     - remove pontuação;
     - remove espaços duplicados.
@@ -35,127 +84,467 @@ def normalizar_texto(texto: str) -> str:
     texto = texto.strip().lower()
 
     texto = unicodedata.normalize("NFD", texto)
+
     texto = "".join(
         caractere
         for caractere in texto
         if unicodedata.category(caractere) != "Mn"
     )
 
-    texto = re.sub(r"[^a-z0-9\s]", " ", texto)
-    texto = re.sub(r"\s+", " ", texto)
+    texto = re.sub(
+        r"[^a-z0-9\s]",
+        " ",
+        texto,
+    )
+
+    texto = re.sub(
+        r"\s+",
+        " ",
+        texto,
+    )
 
     return texto.strip()
 
 
-def localizar_servico(servico_ia: str) -> str | None:
+# ==========================================
+# VALIDAÇÃO DA CONFIGURAÇÃO
+# ==========================================
+def validar_configuracao_ia() -> None:
     """
-    Converte o serviço retornado pela IA para a chave oficial
-    existente em pontos_os.
+    Confere se todas as categorias usadas nos sinônimos
+    e na ordem existem em pontos_os.
+    """
+    categorias_pontos = set(pontos_os)
+    categorias_sinonimos = set(sinonimos)
+    categorias_ordenadas = set(CATEGORIAS_ORDENADAS)
+
+    for categoria in sorted(
+        categorias_sinonimos - categorias_pontos
+    ):
+        logger.warning(
+            "Categoria existente em sinonimos, mas ausente "
+            f"em pontos_os: {categoria!r}"
+        )
+
+    for categoria in sorted(
+        categorias_ordenadas - categorias_pontos
+    ):
+        logger.warning(
+            "Categoria existente em CATEGORIAS_ORDENADAS, "
+            f"mas ausente em pontos_os: {categoria!r}"
+        )
+
+
+validar_configuracao_ia()
+
+
+# ==========================================
+# LOCALIZAÇÃO DO SERVIÇO OFICIAL
+# ==========================================
+def localizar_servico(
+    servico_ia: Any,
+) -> str | None:
+    """
+    Transforma o nome retornado pela IA em uma categoria
+    oficial existente em pontos_os.
     """
     servico_normalizado = normalizar_texto(servico_ia)
 
-    # 1. Procura diretamente nas categorias oficiais
+    if not servico_normalizado:
+        return None
+
+    # Primeiro compara com os nomes oficiais.
     for categoria_oficial in pontos_os:
-        if normalizar_texto(categoria_oficial) == servico_normalizado:
+        if (
+            normalizar_texto(categoria_oficial)
+            == servico_normalizado
+        ):
             return categoria_oficial
 
-    # 2. Procura nos sinônimos
+    # Depois compara com os sinônimos.
     for categoria_oficial, lista_sinonimos in sinonimos.items():
         if categoria_oficial not in pontos_os:
-            logger.warning(
-                f"Categoria de sinônimo não existe em pontos_os: "
-                f"{categoria_oficial!r}"
-            )
+            continue
+
+        if not isinstance(lista_sinonimos, list):
             continue
 
         for sinonimo in lista_sinonimos:
-            if normalizar_texto(sinonimo) == servico_normalizado:
+            if (
+                normalizar_texto(sinonimo)
+                == servico_normalizado
+            ):
                 return categoria_oficial
 
     return None
 
 
-def detectar_servico_localmente(texto_os: str) -> str | None:
+# ==========================================
+# IDENTIFICAÇÃO LOCAL DE O.S.
+# ==========================================
+def texto_parece_os(texto_os: str) -> bool:
     """
-    Detecta serviços muito claros antes de chamar a IA.
+    Verifica se o texto possui campos típicos de uma O.S.
+    """
+    texto = normalizar_texto(texto_os)
 
-    Isso evita falhas para textos explícitos como:
-    'Reativação de fibra óptica realizada'.
+    indicadores = [
+        "nome do cliente",
+        "cliente",
+        "modelo da ont",
+        "modelo da onu",
+        "mac",
+        "numero da caixa",
+        "caixa",
+        "cto",
+        "olt",
+        "potencia de rx",
+        "potencia rx",
+        "teste de velocidade",
+        "tipo e suporte",
+        "servico realizado",
+    ]
+
+    quantidade = sum(
+        1
+        for indicador in indicadores
+        if indicador in texto
+    )
+
+    # Dois indicadores já tornam o texto bastante provável
+    # de ser uma O.S.
+    return quantidade >= 2
+
+
+# ==========================================
+# EXTRAÇÃO LOCAL DO CLIENTE
+# ==========================================
+def limpar_nome_cliente(nome: str) -> str:
+    """
+    Limpa caracteres estranhos e limita o tamanho do nome.
+    """
+    nome = nome.strip()
+
+    # Evita capturar campos colocados na mesma linha.
+    separadores = [
+        "|",
+        ";",
+        " user:",
+        " usuário:",
+        " usuario:",
+        " senha:",
+        " olt:",
+        " rx:",
+        " mac:",
+    ]
+
+    nome_minusculo = nome.lower()
+
+    for separador in separadores:
+        posicao = nome_minusculo.find(separador)
+
+        if posicao != -1:
+            nome = nome[:posicao].strip()
+            nome_minusculo = nome.lower()
+
+    nome = re.sub(
+        r"\s+",
+        " ",
+        nome,
+    ).strip()
+
+    # Remove pontuação no começo ou final.
+    nome = nome.strip(" :-–—.,;|")
+
+    if len(nome) > 120:
+        nome = nome[:120].strip()
+
+    return nome.upper()
+
+
+def extrair_cliente_localmente(
+    texto_os: str,
+) -> str:
+    """
+    Extrai o nome a partir dos campos mais comuns.
+    """
+    padroes = [
+        r"^\s*nome\s+do\s+cliente\s*:\s*(.+?)\s*$",
+        r"^\s*nome\s+cliente\s*:\s*(.+?)\s*$",
+        r"^\s*cliente\s*:\s*(.+?)\s*$",
+        r"^\s*assinante\s*:\s*(.+?)\s*$",
+        r"^\s*nome\s*:\s*(.+?)\s*$",
+    ]
+
+    for linha in texto_os.splitlines():
+        linha = linha.strip()
+
+        if not linha:
+            continue
+
+        for padrao in padroes:
+            correspondencia = re.match(
+                padrao,
+                linha,
+                flags=re.IGNORECASE,
+            )
+
+            if not correspondencia:
+                continue
+
+            nome = limpar_nome_cliente(
+                correspondencia.group(1)
+            )
+
+            if nome:
+                return nome
+
+    return "NÃO INFORMADO"
+
+
+# ==========================================
+# DETECÇÃO LOCAL DO SERVIÇO
+# ==========================================
+def obter_categorias_em_ordem() -> list[str]:
+    """
+    Retorna primeiro as categorias definidas em
+    CATEGORIAS_ORDENADAS e depois quaisquer categorias
+    restantes de pontos_os.
+    """
+    resultado: list[str] = []
+
+    for categoria in CATEGORIAS_ORDENADAS:
+        if (
+            categoria in pontos_os
+            and categoria not in resultado
+        ):
+            resultado.append(categoria)
+
+    for categoria in pontos_os:
+        if categoria not in resultado:
+            resultado.append(categoria)
+
+    return resultado
+
+
+def detectar_servico_localmente(
+    texto_os: str,
+) -> str | None:
+    """
+    Procura categorias e sinônimos diretamente no texto.
+
+    Os sinônimos maiores são testados primeiro para evitar
+    que uma frase específica seja confundida com outra
+    categoria mais genérica.
     """
     texto_normalizado = normalizar_texto(texto_os)
 
-    expressoes_reativacao = [
-        "reativacao de fibra optica realizada",
-        "reativacao de fibra realizada",
-        "fibra reativada",
-        "cliente reativado",
-        "servico reativado",
-        "reativacao realizada",
-    ]
+    if not texto_normalizado:
+        return None
 
-    if any(
-        expressao in texto_normalizado
-        for expressao in expressoes_reativacao
-    ):
-        # Localiza automaticamente a categoria oficial correta
-        candidatos = [
-            "reativação fibra",
-            "reativação",
-            "reativacao fibra",
-        ]
+    categorias_ordenadas = obter_categorias_em_ordem()
 
-        for candidato in candidatos:
-            servico = localizar_servico(candidato)
+    for categoria in categorias_ordenadas:
+        expressoes: list[str] = []
 
-            if servico:
-                return servico
+        # Inclui o próprio nome oficial.
+        expressoes.append(categoria)
+
+        lista_sinonimos = sinonimos.get(
+            categoria,
+            [],
+        )
+
+        if isinstance(lista_sinonimos, list):
+            expressoes.extend(lista_sinonimos)
+
+        expressoes_normalizadas = {
+            normalizar_texto(expressao)
+            for expressao in expressoes
+            if normalizar_texto(expressao)
+        }
+
+        # Testa frases maiores primeiro.
+        expressoes_ordenadas = sorted(
+            expressoes_normalizadas,
+            key=len,
+            reverse=True,
+        )
+
+        for expressao in expressoes_ordenadas:
+            if expressao in texto_normalizado:
+                logger.info(
+                    "Serviço detectado localmente | "
+                    f"CATEGORIA={categoria}"
+                )
+
+                return categoria
 
     return None
 
 
-def processar_com_ia(texto_os: str) -> dict:
+# ==========================================
+# FALLBACK LOCAL
+# ==========================================
+def processar_localmente(
+    texto_os: str,
+    servico_local: str | None = None,
+) -> dict[str, Any]:
     """
-    Analisa a O.S., extrai o cliente, identifica um único serviço
-    e calcula os pontos diretamente no Python.
+    Processa a O.S. sem depender do Gemini.
     """
-    resultado_padrao = {
-        "is_os": False,
-        "cliente": "",
-        "servicos": [],
-        "pontos": 0.0,
+    if not texto_parece_os(texto_os):
+        return criar_resultado_padrao(
+            "Texto não identificado como O.S."
+        )
+
+    if not servico_local:
+        servico_local = detectar_servico_localmente(
+            texto_os
+        )
+
+    if not servico_local:
+        return criar_resultado_padrao(
+            "Serviço não identificado localmente."
+        )
+
+    if servico_local not in pontos_os:
+        logger.warning(
+            "Serviço local ausente em pontos_os: "
+            f"{servico_local!r}"
+        )
+
+        return criar_resultado_padrao(
+            "Categoria sem pontuação configurada."
+        )
+
+    cliente = extrair_cliente_localmente(
+        texto_os
+    )
+
+    resultado = {
+        "is_os": True,
+        "cliente": cliente,
+        "servicos": [servico_local],
+        "pontos": float(
+            pontos_os[servico_local]
+        ),
+        "modelo": "fallback-local",
     }
 
-    if not client:
-        logger.error("Cliente Gemini não está configurado.")
-        return resultado_padrao
+    logger.info(
+        "O.S. processada pelo fallback local | "
+        f"CLIENTE={cliente} | "
+        f"SERVIÇO={servico_local} | "
+        f"PONTOS={resultado['pontos']}"
+    )
 
-    if not isinstance(texto_os, str) or not texto_os.strip():
-        logger.warning("Texto da O.S. vazio ou inválido.")
-        return resultado_padrao
+    return resultado
 
-    nomes_servicos_permitidos = list(pontos_os.keys())
 
-    # Ajuda determinística para serviços muito explícitos
-    servico_detectado_localmente = detectar_servico_localmente(texto_os)
+# ==========================================
+# CLASSIFICAÇÃO DOS ERROS DA API
+# ==========================================
+def identificar_tipo_erro(
+    erro: Exception,
+) -> str:
+    mensagem = str(erro).upper()
 
-    prompt = f"""
+    if (
+        "404" in mensagem
+        or "NOT_FOUND" in mensagem
+    ):
+        return "modelo_indisponivel"
+
+    if (
+        "429" in mensagem
+        or "RESOURCE_EXHAUSTED" in mensagem
+        or "RATE LIMIT" in mensagem
+    ):
+        return "limite"
+
+    if (
+        "503" in mensagem
+        or "UNAVAILABLE" in mensagem
+        or "HIGH DEMAND" in mensagem
+    ):
+        return "temporario"
+
+    if (
+        "401" in mensagem
+        or "403" in mensagem
+        or "UNAUTHENTICATED" in mensagem
+        or "PERMISSION_DENIED" in mensagem
+        or "API_KEY_INVALID" in mensagem
+    ):
+        return "autenticacao"
+
+    return "desconhecido"
+
+
+# ==========================================
+# SCHEMA DA RESPOSTA
+# ==========================================
+def criar_schema_resposta(
+    nomes_servicos_permitidos: list[str],
+) -> dict[str, Any]:
+    """
+    Cria o JSON Schema usado pelo Gemini.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "is_os": {
+                "type": "boolean",
+            },
+            "cliente": {
+                "type": "string",
+            },
+            "servicos": {
+                "type": "array",
+                "maxItems": 1,
+                "items": {
+                    "type": "string",
+                    "enum": nomes_servicos_permitidos,
+                },
+            },
+        },
+        "required": [
+            "is_os",
+            "cliente",
+            "servicos",
+        ],
+        "additionalProperties": False,
+    }
+
+
+# ==========================================
+# CRIAÇÃO DO PROMPT
+# ==========================================
+def criar_prompt(
+    texto_os: str,
+    nomes_servicos_permitidos: list[str],
+) -> str:
+    return f"""
 Você é um classificador de ordens de serviço de um provedor de internet.
 
-Retorne somente o JSON solicitado.
+Analise o relatório e retorne somente o objeto JSON solicitado.
 
-Sua tarefa:
+TAREFAS:
 
-1. Definir "is_os" como true quando o texto for um relatório de serviço.
-2. Extrair o nome completo do cliente.
-3. Escolher exatamente UM serviço da lista permitida.
-4. Nunca criar outro nome de serviço.
+1. Defina "is_os" como true quando o texto for um relatório de serviço.
+2. Extraia somente o nome completo do cliente.
+3. Escolha exatamente UM serviço da lista permitida.
+4. Copie o nome do serviço exatamente como aparece na lista.
+5. Nunca invente categorias.
+6. Nunca calcule pontos.
 
 SERVIÇOS PERMITIDOS:
 
 {json.dumps(
     nomes_servicos_permitidos,
     ensure_ascii=False,
-    indent=2
+    indent=2,
 )}
 
 SINÔNIMOS:
@@ -163,176 +552,418 @@ SINÔNIMOS:
 {json.dumps(
     sinonimos,
     ensure_ascii=False,
-    indent=2
+    indent=2,
 )}
 
-REGRAS CRÍTICAS:
+REGRAS IMPORTANTES:
 
-- Se houver nome do cliente, ONT, MAC, caixa, OLT, RX,
-  teste de velocidade ou descrição do serviço, considere uma O.S.
-- A descrição do serviço executado vence cabeçalhos conflitantes.
-- "Reativação de fibra óptica realizada" significa reativação.
-- O campo "servicos" deve conter exatamente um item.
-- O item deve ser copiado exatamente da lista permitida.
+- Nome, cliente, ONT, ONU, MAC, caixa, CTO, OLT, RX ou
+  teste de velocidade são indicadores de uma O.S.
+- A descrição do trabalho realizado vence um cabeçalho conflitante.
+- "Reativação de fibra óptica realizada" corresponde a "reativação".
+- Uma O.S. válida deve possuir exatamente um serviço.
+- Uma mensagem que não for O.S. pode retornar uma lista vazia.
+- Não inclua senhas, usuário PPPoE, MAC, RX, OLT ou outros dados
+  dentro do campo "cliente".
+- Retorne apenas JSON.
 
 TEXTO DA O.S.:
 
 {texto_os}
-"""
+""".strip()
 
-    # Use somente identificadores realmente disponíveis na sua conta.
-    modelos_para_testar = [
-        "gemini-3.5-flash",
-        "gemini-2.5-flash",
-    ]
 
-    response = None
-    modelo_usado = None
+# ==========================================
+# LEITURA SEGURA DA RESPOSTA
+# ==========================================
+def extrair_json_resposta(
+    texto_resposta: str,
+) -> dict[str, Any] | None:
+    """
+    Lê JSON puro ou remove blocos Markdown caso o modelo
+    ainda retorne ```json.
+    """
+    if not isinstance(texto_resposta, str):
+        return None
 
-    for nome_modelo in modelos_para_testar:
-        try:
-            resposta_modelo = client.models.generate_content(
-                model=nome_modelo,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                    response_schema={
-                        "type": "object",
-                        "properties": {
-                            "is_os": {
-                                "type": "boolean"
-                            },
-                            "cliente": {
-                                "type": "string"
-                            },
-                            "servicos": {
-                                "type": "array",
-                                "minItems": 1,
-                                "maxItems": 1,
-                                "items": {
-                                    "type": "string",
-                                    "enum": nomes_servicos_permitidos,
-                                },
-                            },
-                        },
-                        "required": [
-                            "is_os",
-                            "cliente",
-                            "servicos",
-                        ],
-                        "additionalProperties": False,
-                    },
-                ),
-            )
+    texto_limpo = texto_resposta.strip()
 
-            # Não basta existir um objeto response.
-            # É necessário ele possuir texto.
-            if resposta_modelo and resposta_modelo.text:
-                response = resposta_modelo
-                modelo_usado = nome_modelo
-                break
-
-            logger.warning(
-                f"Modelo {nome_modelo} respondeu sem conteúdo."
-            )
-
-        except Exception as erro_modelo:
-            logger.warning(
-                f"Erro no modelo {nome_modelo}: {erro_modelo}"
-            )
-
-    if not response or not response.text:
-        logger.error("Nenhum modelo retornou uma resposta válida.")
-        return resultado_padrao
+    texto_limpo = texto_limpo.replace(
+        "```json",
+        "",
+    ).replace(
+        "```JSON",
+        "",
+    ).replace(
+        "```",
+        "",
+    ).strip()
 
     try:
-        texto_resposta = response.text.strip()
+        dados = json.loads(texto_limpo)
 
-        logger.info(
-            f"IA processou usando [{modelo_usado}]. "
-            f"Resposta bruta: {texto_resposta}"
+        if isinstance(dados, dict):
+            return dados
+
+    except json.JSONDecodeError:
+        pass
+
+    # Segunda tentativa: busca o primeiro objeto JSON.
+    inicio = texto_limpo.find("{")
+
+    if inicio == -1:
+        return None
+
+    try:
+        decoder = json.JSONDecoder()
+
+        dados, _ = decoder.raw_decode(
+            texto_limpo[inicio:]
         )
 
-        dados = json.loads(texto_resposta)
+        if isinstance(dados, dict):
+            return dados
 
-    except json.JSONDecodeError as erro_json:
-        logger.error(
-            f"JSON inválido retornado pela IA: {erro_json}. "
-            f"Conteúdo recebido: {response.text!r}"
-        )
-        return resultado_padrao
+    except json.JSONDecodeError:
+        return None
 
-    except Exception as erro:
-        logger.exception(
-            f"Erro ao ler resposta da IA: {erro}"
-        )
-        return resultado_padrao
+    return None
 
-    if not isinstance(dados, dict):
-        logger.warning("A resposta da IA não é um objeto JSON.")
-        return resultado_padrao
 
+# ==========================================
+# VALIDAÇÃO DA RESPOSTA DA IA
+# ==========================================
+def validar_resposta_ia(
+    dados: dict[str, Any],
+    texto_os: str,
+    modelo_usado: str,
+    servico_local: str | None,
+) -> dict[str, Any]:
+    """
+    Valida os dados retornados pela IA e calcula os pontos.
+    """
     is_os = dados.get("is_os") is True
-    cliente = str(dados.get("cliente", "")).strip()
-    servicos_retornados = dados.get("servicos", [])
+
+    cliente = str(
+        dados.get("cliente", "")
+    ).strip()
+
+    servicos_retornados = dados.get(
+        "servicos",
+        [],
+    )
 
     if not is_os:
+        # Se a IA disser que não é O.S., mas o texto possui
+        # indicadores e serviço claro, usa o fallback.
+        if (
+            servico_local
+            and texto_parece_os(texto_os)
+        ):
+            logger.warning(
+                "IA marcou como não O.S., mas o fallback "
+                "local encontrou um serviço."
+            )
+
+            return processar_localmente(
+                texto_os,
+                servico_local,
+            )
+
         return {
             "is_os": False,
             "cliente": cliente,
             "servicos": [],
             "pontos": 0.0,
+            "modelo": modelo_usado,
         }
 
     if not isinstance(servicos_retornados, list):
         logger.warning(
-            f"'servicos' não é uma lista: "
+            "Campo 'servicos' não é uma lista: "
             f"{servicos_retornados!r}"
         )
-        return resultado_padrao
+
+        if servico_local:
+            return processar_localmente(
+                texto_os,
+                servico_local,
+            )
+
+        return criar_resultado_padrao(
+            "Formato de serviços inválido."
+        )
 
     if len(servicos_retornados) != 1:
         logger.warning(
-            f"A IA retornou quantidade inválida de serviços: "
+            "Quantidade inválida de serviços: "
             f"{servicos_retornados!r}"
         )
-        return resultado_padrao
+
+        if servico_local:
+            return processar_localmente(
+                texto_os,
+                servico_local,
+            )
+
+        return criar_resultado_padrao(
+            "Quantidade de serviços inválida."
+        )
 
     servico_retornado = servicos_retornados[0]
 
-    if not isinstance(servico_retornado, str):
-        logger.warning(
-            f"Nome do serviço não é uma string: "
-            f"{servico_retornado!r}"
-        )
-        return resultado_padrao
+    servico_oficial = localizar_servico(
+        servico_retornado
+    )
 
-    servico_oficial = localizar_servico(servico_retornado)
-
-    # Se a IA falhar no nome, usa a detecção determinística
-    if not servico_oficial and servico_detectado_localmente:
-        servico_oficial = servico_detectado_localmente
-
+    if not servico_oficial and servico_local:
         logger.info(
-            f"Serviço corrigido pela detecção local: "
-            f"{servico_oficial}"
+            "Serviço da IA corrigido pelo detector local | "
+            f"IA={servico_retornado!r} | "
+            f"LOCAL={servico_local!r}"
         )
+
+        servico_oficial = servico_local
 
     if not servico_oficial:
         logger.warning(
-            f"Serviço não reconhecido: {servico_retornado!r}"
+            "Serviço não reconhecido: "
+            f"{servico_retornado!r}"
         )
-        return resultado_padrao
+
+        return criar_resultado_padrao(
+            "Serviço não reconhecido."
+        )
+
+    if servico_oficial not in pontos_os:
+        logger.error(
+            "Serviço reconhecido, mas ausente em pontos_os: "
+            f"{servico_oficial!r}"
+        )
+
+        return criar_resultado_padrao(
+            "Serviço sem pontuação configurada."
+        )
+
+    # Caso o cliente venha vazio, tenta extrair localmente.
+    if not cliente:
+        cliente = extrair_cliente_localmente(
+            texto_os
+        )
+    else:
+        cliente = limpar_nome_cliente(
+            cliente
+        )
 
     pontos_calculados = float(
-        pontos_os.get(servico_oficial, 0.0)
+        pontos_os[servico_oficial]
     )
 
-    return {
+    resultado = {
         "is_os": True,
         "cliente": cliente,
         "servicos": [servico_oficial],
         "pontos": pontos_calculados,
         "modelo": modelo_usado,
     }
+
+    logger.info(
+        "O.S. processada com sucesso | "
+        f"MODELO={modelo_usado} | "
+        f"CLIENTE={cliente} | "
+        f"SERVIÇO={servico_oficial} | "
+        f"PONTOS={pontos_calculados}"
+    )
+
+    return resultado
+
+
+# ==========================================
+# FUNÇÃO PRINCIPAL
+# ==========================================
+def processar_com_ia(
+    texto_os: str,
+) -> dict[str, Any]:
+    """
+    Processa uma O.S. usando Gemini e fallback local.
+
+    Fluxo:
+
+    1. Valida o texto.
+    2. Detecta um possível serviço local.
+    3. Tenta os modelos Gemini configurados.
+    4. Valida o JSON.
+    5. Calcula os pontos no Python.
+    6. Se todos os modelos falharem, usa o fallback local.
+    """
+    if not isinstance(texto_os, str):
+        return criar_resultado_padrao(
+            "Texto recebido não é uma string."
+        )
+
+    texto_os = texto_os.strip()
+
+    if not texto_os:
+        return criar_resultado_padrao(
+            "Texto da O.S. vazio."
+        )
+
+    servico_local = detectar_servico_localmente(
+        texto_os
+    )
+
+    # Sem chave Gemini, ainda tenta processar localmente.
+    if not client:
+        logger.warning(
+            "Gemini não configurado. Usando fallback local."
+        )
+
+        return processar_localmente(
+            texto_os,
+            servico_local,
+        )
+
+    nomes_servicos_permitidos = list(
+        pontos_os.keys()
+    )
+
+    prompt = criar_prompt(
+        texto_os,
+        nomes_servicos_permitidos,
+    )
+
+    schema = criar_schema_resposta(
+        nomes_servicos_permitidos
+    )
+
+    response = None
+    modelo_usado = None
+
+    for nome_modelo in MODELOS_PREFERIDOS:
+        try:
+            logger.info(
+                f"Tentando modelo {nome_modelo}..."
+            )
+
+            resposta_modelo = (
+                client.models.generate_content(
+                    model=nome_modelo,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.0,
+                        response_mime_type=(
+                            "application/json"
+                        ),
+                        response_schema=schema,
+                    ),
+                )
+            )
+
+            if (
+                resposta_modelo
+                and resposta_modelo.text
+                and resposta_modelo.text.strip()
+            ):
+                response = resposta_modelo
+                modelo_usado = nome_modelo
+
+                logger.info(
+                    f"Modelo {nome_modelo} respondeu."
+                )
+
+                break
+
+            logger.warning(
+                f"Modelo {nome_modelo} respondeu sem texto."
+            )
+
+        except Exception as erro:
+            tipo_erro = identificar_tipo_erro(
+                erro
+            )
+
+            logger.warning(
+                f"Erro no modelo {nome_modelo} | "
+                f"TIPO={tipo_erro} | ERRO={erro}"
+            )
+
+            # Não aguarda: passa imediatamente ao próximo.
+            continue
+
+    # Todos os modelos falharam.
+    if (
+        not response
+        or not response.text
+        or not modelo_usado
+    ):
+        logger.error(
+            "Todos os modelos Gemini falharam. "
+            "Tentando fallback local."
+        )
+
+        return processar_localmente(
+            texto_os,
+            servico_local,
+        )
+
+    texto_resposta = response.text.strip()
+
+    # Registra apenas a resposta estruturada da IA.
+    # Não registra o texto original com senhas.
+    logger.info(
+        f"Resposta recebida de [{modelo_usado}]: "
+        f"{texto_resposta}"
+    )
+
+    dados = extrair_json_resposta(
+        texto_resposta
+    )
+
+    if not dados:
+        logger.error(
+            "Não foi possível extrair um JSON válido "
+            "da resposta do Gemini."
+        )
+
+        return processar_localmente(
+            texto_os,
+            servico_local,
+        )
+
+    return validar_resposta_ia(
+        dados=dados,
+        texto_os=texto_os,
+        modelo_usado=modelo_usado,
+        servico_local=servico_local,
+    )
+
+
+# ==========================================
+# TESTE MANUAL
+# ==========================================
+if __name__ == "__main__":
+    texto_teste = """
+Ont: Comodato
+Modelo da ONT: Wifiber 1200R
+MAC: 000000000000
+
+Número da caixa: 05-041CER
+Nome do cliente: JERBSON RODRIGUES COSTA
+OLT: Carmo lojas
+
+Reativação de fibra óptica realizada.
+Potência de RX: -23 dBm.
+Teste de velocidade: 789 Mbps.
+"""
+
+    resultado = processar_com_ia(
+        texto_teste
+    )
+
+    print(
+        json.dumps(
+            resultado,
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
