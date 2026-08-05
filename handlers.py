@@ -74,70 +74,37 @@ async def ajuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Mensagem base para todos os usuários (Técnicos)
     mensagem = (
-        f"👋 <b>Olá, {user.first_name}!</b>\n"
-        f"╔══════════════════════╗\n"
-        f"   🤖 <b>BOT DE PONTUAÇÃO</b>\n"
-        f"╚══════════════════════╝\n\n"
+        f"👋 <b>Olá, {user.first_name}!</b>\n\n"
+        f"🤖 <b>BOT DE PONTUAÇÃO</b>\n"
+        f"<i>Gerenciamento automático de Ordens de Serviço.</i>\n\n"
 
-        f"📌 <b>COMO FUNCIONA</b>\n"
-        f"────────────────────\n"
-        f"📝 Envie o relatório da <b>O.S.</b> normalmente no chat.\n"
-        f"⚡ O bot identifica o serviço, calcula os pontos e registra automaticamente.\n\n"
+        f"📌 <b>Como Funciona?</b>\n"
+        f"Basta enviar o texto do seu relatório de <b>O.S.</b> aqui no chat. O bot lerá os dados, calculará os pontos e fará o registro sozinho! ⚡\n\n"
 
         f"👨‍🔧 <b>PAINEL DO TÉCNICO</b>\n"
-        f"────────────────────\n"
-        f"📊 <b>/pontos</b>\n"
-        f"   └ Ver saldo de pontos e quantidade de O.S.\n\n"
-
-        f"📜 <b>/historico</b>\n"
-        f"   └ Últimas 10 O.S. registradas.\n\n"
-
-        f"🏆 <b>/ranking</b>\n"
-        f"   └ Ranking dos técnicos do mês.\n\n"
-
-        f"🗑️ <b>/excluir_ultima</b>\n"
-        f"   └ Remove a última O.S. enviada.\n\n"
-
-        f"❓ <b>/ajuda</b>\n"
-        f"   └ Exibe este painel novamente."
+        f"🔹 /pontos — Seu saldo e quantidade de O.S.\n"
+        f"🔹 /historico — Suas últimas 10 O.S. registradas\n"
+        f"🔹 /ranking — Placar dos técnicos no mês\n"
+        f"🔹 /excluir_ultima — Desfaz o último registro\n"
+        f"🔹 /ajuda — Exibe este menu principal\n"
     )
 
     if await is_supervisor(user_id):
         mensagem += (
-            f"\n\n"
-            f"🛡️ <b>PAINEL DA SUPERVISÃO</b>\n"
-            f"────────────────────\n"
-
-            f"👤 <b>/consultar_cliente &lt;nome&gt;</b>\n"
-            f"   └ Consulta o histórico do cliente.\n\n"
-
-            f"📁 <b>/exportar</b>\n"
-            f"   └ Exporta a planilha Excel do mês.\n\n"
-
-            f"➕ <b>/add &lt;ID&gt; [cargo]</b>\n"
-            f"   └ Adiciona um novo usuário.\n"
-            f"   └ Ex.: <code>/add 123456 admin</code>\n\n"
-
-            f"➖ <b>/delet &lt;ID&gt;</b>\n"
-            f"   └ Remove o acesso de um usuário.\n\n"
-
-            f"🚫 <b>/apagar_usuario &lt;ID&gt;</b>\n"
-            f"   └ Exclui o usuário e todos os seus registros.\n\n"
-
-            f"🗑️ <b>/apagar_os &lt;ID_OS&gt;</b>\n"
-            f"   └ Exclui uma O.S. pelo ID.\n\n"
-
-            f"🎯 <b>/forcar_os &lt;pontos&gt; &lt;serviço&gt;</b>\n"
-            f"   └ Utilize respondendo à mensagem da O.S."
+            f"\n🛡️ <b>PAINEL DA SUPERVISÃO</b>\n"
+            f"🔸 /consultar_cliente <code>nome</code> — Histórico do cliente\n"
+            f"🔸 /exportar — Planilha Excel do mês\n"
+            f"🔸 /add <code>ID</code> <code>cargo</code> — Novo acesso (Ex: /add 123 admin)\n"
+            f"🔸 /delet <code>ID</code> — Remove acesso de um usuário\n"
+            f"🔸 /apagar_usuario <code>ID</code> — Deleta usuário e seu histórico\n"
+            f"🔸 /apagar_os <code>ID_OS</code> — Exclui um registro específico\n"
+            f"🔸 /forcar_os <code>pts</code> <code>serviço</code> — (Responda à O.S. com este comando)\n"
         )
 
     mensagem += (
-        f"\n\n"
-        f"══════════════════════\n"
-        f"💡 <i>Dica:</i> Basta enviar o texto da O.S.\n"
-        f"🤖 O restante é feito automaticamente.\n"
-        f"══════════════════════"
+        f"\n💡 <i>Dica: Apenas envie sua O.S. e deixe o trabalho pesado comigo!</i>"
     )
+    
     await update.message.reply_text(mensagem, parse_mode='HTML')
 
 async def pontos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169,8 +136,8 @@ async def historico(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     msg = "📋 <b>Suas Últimas 10 O.S.:</b>\n\n"
-    for os_id, data_hora, tipos, pts, cliente in registros:
-        msg += f"🔹 <b>ID {os_id}</b> | {data_hora[:10]} | {pts} pts\n👤 {cliente}\n\n"
+    for os_id, data_formatada, tipos, pts, cliente in registros:
+        msg += f"🔹 <b>ID {os_id}</b> | 📅 {data_formatada} | {pts} pts\n👤 {cliente}\n\n"
 
     await update.message.reply_text(msg, parse_mode='HTML')
 
@@ -212,7 +179,7 @@ async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_supervisor(update.effective_user.id): return
     
     if not context.args:
-        await update.message.reply_text("⚠️ Uso correto: /add <ID_DO_USUARIO> [cargo]")
+        await update.message.reply_text("⚠️ Uso correto: /add <code>ID_DO_USUARIO</code> [cargo]", parse_mode='HTML')
         return
         
     user_alvo = int(context.args[0])
@@ -225,21 +192,21 @@ async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def delet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_supervisor(update.effective_user.id): return
-    if not context.args: return await update.message.reply_text("⚠️ Uso: /delet <ID>")
+    if not context.args: return await update.message.reply_text("⚠️ Uso: /delet <code>ID</code>", parse_mode='HTML')
     
     if await remover_usuario(int(context.args[0])):
         await update.message.reply_text("✅ Permissão do usuário removida.")
 
 async def apagar_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_supervisor(update.effective_user.id): return
-    if not context.args: return await update.message.reply_text("⚠️ Uso: /apagar_usuario <ID>")
+    if not context.args: return await update.message.reply_text("⚠️ Uso: /apagar_usuario <code>ID</code>", parse_mode='HTML')
     
     if await apagar_usuario_completo(int(context.args[0])):
         await update.message.reply_text("✅ Usuário e todo seu histórico apagados.")
 
 async def apagar_os(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_supervisor(update.effective_user.id): return
-    if not context.args: return await update.message.reply_text("⚠️ Uso: /apagar_os <ID_DA_OS>")
+    if not context.args: return await update.message.reply_text("⚠️ Uso: /apagar_os <code>ID_DA_OS</code>", parse_mode='HTML')
     
     if await apagar_os_especifica(int(context.args[0])):
         await update.message.reply_text("✅ O.S. apagada com sucesso.")
@@ -248,7 +215,7 @@ async def apagar_os(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def consultar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_supervisor(update.effective_user.id): return
-    if not context.args: return await update.message.reply_text("⚠️ Uso: /consultar_cliente <nome>")
+    if not context.args: return await update.message.reply_text("⚠️ Uso: /consultar_cliente <code>nome</code>", parse_mode='HTML')
     
     termo = " ".join(context.args)
     resultados = await db_consultar_cliente(termo)
@@ -257,8 +224,8 @@ async def consultar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("📭 Nenhum cliente encontrado com esse termo.")
         
     msg = f"🔎 <b>Resultados para '{termo}':</b>\n\n"
-    for data_hora, u_id, tipos, pts, cli in resultados:
-        msg += f"👤 <b>{cli}</b>\n📅 {data_hora[:10]} | 🛠️ {tipos.upper()}\n\n"
+    for data_formatada, tecnico_nome, tipos, pts, cli in resultados:
+        msg += f"👤 <b>{cli}</b>\n📅 {data_formatada} | 👨‍🔧 {tecnico_nome} | 🛠️ {tipos.upper()}\n\n"
     await update.message.reply_text(msg, parse_mode='HTML')
 
 async def exportar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -274,10 +241,10 @@ async def exportar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
-    writer.writerow(['ID_OS', 'ID_TECNICO', 'DATA_HORA', 'SERVICOS', 'PONTOS', 'DESCRICAO'])
+    writer.writerow(['ID_OS', 'NOME_TECNICO', 'DATA_HORA', 'SERVICOS', 'PONTOS', 'CLIENTE', 'DESCRICAO'])
     
     for row in dados:
-        writer.writerow(row)
+        writer.writerow([row[0], row[1], row[2], row[3], row[4], row[6], row[5]])
         
     output.seek(0)
     bytes_io = io.BytesIO(output.getvalue().encode('utf-8-sig'))
@@ -292,10 +259,10 @@ async def forcar_os(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_supervisor(update.effective_user.id): return
     
     if not update.message.reply_to_message:
-        return await update.message.reply_text("⚠️ Você deve responder a uma mensagem de O.S. usando:\n/forcar_os <pontos> <servico>")
+        return await update.message.reply_text("⚠️ Você deve responder a uma mensagem de O.S. usando:\n/forcar_os <code>pontos</code> <code>servico</code>", parse_mode='HTML')
     
     if len(context.args) < 2:
-        return await update.message.reply_text("⚠️ Uso: /forcar_os 1.5 Instalacao")
+        return await update.message.reply_text("⚠️ Uso: /forcar_os <code>1.5</code> <code>Instalacao</code>", parse_mode='HTML')
         
     pontos = float(context.args[0].replace(',', '.'))
     servico = " ".join(context.args[1:])
@@ -328,13 +295,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ==========================================
     # PORTEIRO (GATEKEEPER) - IGNORA BATE-PAPO
     # ==========================================
-    # Ignora se for muito curto E não contiver palavras-chave típicas de telecom.
-    # Ex: Impede que mensagens como "Lucas" ou "Pontos" acionem a IA e causem Timeout.
     texto_lower = texto_mensagem.lower()
     palavras_chave_os = ['cliente', 'os', 'olt', 'mac', 'rx', 'potência', 'velocidade', 'sinal']
     
     if len(texto_mensagem) < 30 and not any(palavra in texto_lower for palavra in palavras_chave_os):
-        # A mensagem é bate-papo irrelevante, o bot sai da função sem fazer nada
         return
     # ==========================================
 
@@ -363,11 +327,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-        # IA Gemini em SEGUNDO PLANO com Timeout (Cronômetro de 35s)
+        # IA Gemini em SEGUNDO PLANO com Timeout ampliado (Cronômetro de 45s)
         try:
             resultado = await asyncio.wait_for(
                 asyncio.to_thread(processar_com_ia, texto_mensagem),
-                timeout=35.0
+                timeout=45.0
             )
         except asyncio.TimeoutError:
             try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_espera.message_id)
