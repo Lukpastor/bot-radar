@@ -155,7 +155,10 @@ async def registrar_tentativa_duplicada(user_id: int, protocolo: str, descricao:
         logger.error(f"Erro ao registrar tentativa duplicada: {e}")
 
 async def contar_tentativas_10_min(user_id: int) -> int:
-    """Sistema Anti-Flood: conta tentativas nos últimos 10 minutos."""
+    """Sistema Anti-Flood: conta tentativas nos últimos 10 minutos (imune ao fuso do servidor)."""
+    agora = get_datetime_brasil()
+    limite_tempo = (agora - datetime.timedelta(minutes=10)).strftime('%Y-%m-%d %H:%M:%S')
+
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
             async with conn.execute(
@@ -163,16 +166,15 @@ async def contar_tentativas_10_min(user_id: int) -> int:
                 SELECT COUNT(*)
                 FROM historico_duplicidades
                 WHERE user_id = ?
-                AND datetime(data_hora) >= datetime('now', '-10 minutes', 'localtime')
+                AND data_hora >= ?
                 """,
-                (user_id,)
+                (user_id, limite_tempo)
             ) as cursor:
                 res = await cursor.fetchone()
                 return res[0] if res else 0
     except Exception as e:
         logger.error(f"Erro ao contar tentativas de flood: {e}")
         return 0
-
 async def verificar_por_protocolo_conn(conn, protocolo: str):
     if not protocolo or protocolo in ["NÃO INFORMADO", ""]:
         return False
@@ -417,11 +419,25 @@ async def atualizar_nome_usuario(user_id: int, nome: str):
     except Exception: pass
 
 async def obter_historico_usuario(user_id: int, limite: int = 15):
+    """Obtém o histórico do próprio usuário com a data já formatada para o Brasil."""
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
-            async with conn.execute("SELECT id, data_hora, tipos_identificados, pontos_ganhos, cliente FROM historico_os WHERE user_id = ? ORDER BY data_hora DESC LIMIT ?", (user_id, limite)) as cursor:
+            async with conn.execute("""
+                SELECT 
+                    id, 
+                    strftime('%d/%m/%Y %H:%M', data_hora) as data_formatada, 
+                    tipos_identificados, 
+                    pontos_ganhos, 
+                    cliente 
+                FROM historico_os 
+                WHERE user_id = ? 
+                ORDER BY data_hora DESC 
+                LIMIT ?
+            """, (user_id, limite)) as cursor:
                 return await cursor.fetchall()
-    except Exception: return []
+    except Exception as e: 
+        logger.error(f"Erro ao obter histórico do usuário: {e}")
+        return []
 
 async def excluir_ultima_os(user_id: int) -> bool:
     try:
