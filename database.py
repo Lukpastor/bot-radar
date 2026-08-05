@@ -432,18 +432,49 @@ async def excluir_ultima_os(user_id: int) -> bool:
     except Exception: return False
 
 async def obter_todos_dados_mes(ano: str, mes: str):
+    """Gera o relatório mensal exportando o NOME do técnico em vez do ID numérico."""
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
-            async with conn.execute("SELECT id, user_id, data_hora, tipos_identificados, pontos_ganhos, descricao_os FROM historico_os WHERE strftime('%Y', data_hora) = ? AND strftime('%m', data_hora) = ? ORDER BY data_hora DESC", (ano, mes)) as cursor:
+            async with conn.execute("""
+                SELECT 
+                    h.id, 
+                    COALESCE(u.nome, 'Téc ' || h.user_id) as tecnico_nome, 
+                    strftime('%d/%m/%Y %H:%M', h.data_hora) as data_formatada, 
+                    h.tipos_identificados, 
+                    h.pontos_ganhos, 
+                    h.descricao_os,
+                    h.cliente
+                FROM historico_os h
+                LEFT JOIN usuarios u ON h.user_id = u.user_id
+                WHERE strftime('%Y', h.data_hora) = ? AND strftime('%m', h.data_hora) = ? 
+                ORDER BY h.data_hora DESC
+            """, (ano, mes)) as cursor:
                 return await cursor.fetchall()
-    except Exception: return []
+    except Exception as e: 
+        logger.error(f"Erro ao obter dados do mês: {e}")
+        return []
 
 async def consultar_cliente(termo_busca: str):
+    """Busca o histórico do cliente com o NOME do técnico e a data formatada para o Brasil."""
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
-            async with conn.execute("SELECT data_hora, user_id, tipos_identificados, pontos_ganhos, cliente FROM historico_os WHERE cliente LIKE ? ORDER BY data_hora DESC LIMIT 10", (f'%{termo_busca}%',)) as cursor:
+            async with conn.execute("""
+                SELECT 
+                    strftime('%d/%m/%Y %H:%M', h.data_hora) as data_formatada,
+                    COALESCE(u.nome, 'Téc ' || h.user_id) as tecnico_nome,
+                    h.tipos_identificados, 
+                    h.pontos_ganhos, 
+                    h.cliente 
+                FROM historico_os h
+                LEFT JOIN usuarios u ON h.user_id = u.user_id
+                WHERE h.cliente LIKE ? 
+                ORDER BY h.data_hora DESC 
+                LIMIT 15
+            """, (f'%{termo_busca}%',)) as cursor:
                 return await cursor.fetchall()
-    except Exception: return []
+    except Exception as e: 
+        logger.error(f"Erro ao consultar cliente: {e}")
+        return []
 
 async def apagar_os_especifica(os_id: int) -> bool:
     try:
