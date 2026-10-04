@@ -13,8 +13,11 @@ FUSO_BRASIL = datetime.timezone(datetime.timedelta(hours=-3))
 usuarios_cache = {}  # Formato: {user_id: {"cargo": str, "exp": datetime.datetime}}
 TTL_CACHE_SEGUNDOS = 300
 
+def get_datetime_brasil():
+    return datetime.datetime.now(FUSO_BRASIL)
+
 def get_agora_brasil():
-    return datetime.datetime.now(FUSO_BRASIL).strftime('%Y-%m-%d %H:%M:%S')
+    return get_datetime_brasil().strftime('%Y-%m-%d %H:%M:%S')
 
 def normalizar_texto(texto: str) -> str:
     """Normalização agressiva para impedir que alterações mínimas burlem o hash."""
@@ -82,7 +85,7 @@ async def iniciar_banco():
             try: await conn.execute("ALTER TABLE usuarios ADD COLUMN nome TEXT DEFAULT 'Desconhecido'")
             except sqlite3.OperationalError: pass 
                 
-            # Tabela principal de Histórico de O.S.
+            # Tabela principal de Histórico de O.S. (Atualizada com foto_id)
             await conn.execute('''CREATE TABLE IF NOT EXISTS historico_os (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
                 user_id INTEGER, 
@@ -93,6 +96,7 @@ async def iniciar_banco():
                 cliente TEXT DEFAULT 'Não informado', 
                 protocolo TEXT DEFAULT 'NÃO INFORMADO',
                 hash_os TEXT,
+                foto_id TEXT,
                 FOREIGN KEY(user_id) REFERENCES usuarios(user_id)
             )''')
 
@@ -105,10 +109,11 @@ async def iniciar_banco():
                 data_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )''')
             
-            # Garantia de compatibilidade de colunas
+            # Garantia de compatibilidade de colunas antigas -> novas
             for coluna, tipo in [("cliente", "TEXT DEFAULT 'Não informado'"), 
                                  ("protocolo", "TEXT DEFAULT 'NÃO INFORMADO'"), 
-                                 ("hash_os", "TEXT")]:
+                                 ("hash_os", "TEXT"),
+                                 ("foto_id", "TEXT")]:
                 try:
                     await conn.execute(f"ALTER TABLE historico_os ADD COLUMN {coluna} {tipo}")
                 except sqlite3.OperationalError:
@@ -175,6 +180,7 @@ async def contar_tentativas_10_min(user_id: int) -> int:
     except Exception as e:
         logger.error(f"Erro ao contar tentativas de flood: {e}")
         return 0
+
 async def verificar_por_protocolo_conn(conn, protocolo: str):
     if not protocolo or protocolo in ["NÃO INFORMADO", ""]:
         return False
@@ -209,11 +215,34 @@ async def verificar_por_protocolo(protocolo: str):
 
 async def verificar_duplicidade_interna(conn, protocolo: str, cliente: str, servico: str, descricao_os: str):
     """Verificação interna reutilizando a conexão ativa para evitar race conditions."""
+    # 1. Verifica se o protocolo já existe
     if protocolo and protocolo not in ["NÃO INFORMADO", ""]:
         proto_res = await verificar_por_protocolo_conn(conn, protocolo)
         if proto_res:
             return proto_res
 
+    # 2. Verifica por Cliente + Serviço nas últimas 12 horas
+    # Bloqueia apenas se for o MESMO cliente a receber o MESMO serviço
+    if cliente and cliente.upper() not in ["NÃO INFORMADO", ""]:
+        async with conn.execute(
+            """
+            SELECT h.id, h.cliente, h.tipos_identificados, h.data_hora, h.protocolo, h.pontos_ganhos, 
+                   COALESCE(u.nome, 'Téc ' || h.user_id) as tecnico_nome
+            FROM historico_os h
+            LEFT JOIN usuarios u ON h.user_id = u.user_id
+            WHERE h.cliente = ? AND h.tipos_identificados = ?
+            AND datetime(h.data_hora) >= datetime('now', '-12 hours')
+            """, 
+            (cliente, servico)
+        ) as cursor:
+            res = await cursor.fetchone()
+            if res:
+                return {
+                    "id": res[0], "cliente": res[1], "servico": res[2],
+                    "data_hora": res[3], "protocolo": res[4], "pontos": res[5], "tecnico": res[6]
+                }
+
+    # 3. Proteção contra clique duplo acidental de mensagem 100% igual (Hash)
     hash_atual = gerar_hash_relevante(cliente, servico, descricao_os, protocolo)
     async with conn.execute(
         """
@@ -231,6 +260,7 @@ async def verificar_duplicidade_interna(conn, protocolo: str, cliente: str, serv
                 "id": res[0], "cliente": res[1], "servico": res[2],
                 "data_hora": res[3], "protocolo": res[4], "pontos": res[5], "tecnico": res[6]
             }
+            
     return False
 
 async def verificar_duplicidade(protocolo: str, cliente: str, servico: str, descricao_os: str):
@@ -242,13 +272,13 @@ async def verificar_duplicidade(protocolo: str, cliente: str, servico: str, desc
         logger.error(f"Erro ao verificar duplicidade: {e}")
         return False
 
-async def registrar_os(user_id: int, descricao: str, tipos: str, pontos: float, cliente: str = 'Não informado', protocolo: str = 'NÃO INFORMADO') -> bool:
-    """Registra a O.S. com transação atômica imediata (BEGIN IMMEDIATE), rollback automático e logs completos."""
+async def registrar_os(user_id: int, descricao: str, tipos: str, pontos: float, cliente: str = 'Não informado', protocolo: str = 'NÃO INFORMADO', foto_id: str = None) -> bool:
+    """Registra a O.S. com transação atômica, rollback automático e suporte a imagens."""
     agora = get_agora_brasil()
     hash_atual = gerar_hash_relevante(cliente, tipos, descricao, protocolo)
     
     try:
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(DB_NAME, timeout=10.0) as conn:
             # Proteção contra race condition com bloqueio de escrita imediato
             await conn.execute("BEGIN IMMEDIATE")
             try:
@@ -261,10 +291,10 @@ async def registrar_os(user_id: int, descricao: str, tipos: str, pontos: float, 
                 await conn.execute(
                     """
                     INSERT INTO historico_os 
-                    (user_id, data_hora, descricao_os, tipos_identificados, pontos_ganhos, cliente, protocolo, hash_os) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (user_id, data_hora, descricao_os, tipos_identificados, pontos_ganhos, cliente, protocolo, hash_os, foto_id) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, 
-                    (user_id, agora, descricao, tipos, pontos, cliente, protocolo, hash_atual)
+                    (user_id, agora, descricao, tipos, pontos, cliente, protocolo, hash_atual, foto_id)
                 )
                 await conn.commit()
                 logger.info(f"OS REGISTRADA | USER={user_id} | CLIENTE={cliente} | SERVIÇO={tipos} | PONTOS={pontos} | PROTOCOLO={protocolo}")
@@ -301,12 +331,10 @@ async def obter_resumo_mes(user_id: int, ano: str, mes: str) -> dict:
         return {"pontos": 0.0, "os": 0}
 
 async def obter_pontos_mes(user_id: int, ano: str, mes: str) -> float:
-    """Função de compatibilidade retroativa usando a consulta unificada."""
     resumo = await obter_resumo_mes(user_id, ano, mes)
     return resumo["pontos"]
 
 async def contar_os_mes(user_id: int, ano: str, mes: str) -> int:
-    """Função de compatibilidade retroativa usando a consulta unificada."""
     resumo = await obter_resumo_mes(user_id, ano, mes)
     return resumo["os"]
 
@@ -333,7 +361,7 @@ async def verificar_usuario(user_id: int):
         logger.error(f"Erro ao verificar usuário: {e}")
         return None
 
-# --- Funções auxiliares mantidas para compatibilidade ---
+# --- Funções auxiliares ---
 async def set_user_state(user_id: int, state: str):
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
@@ -419,7 +447,6 @@ async def atualizar_nome_usuario(user_id: int, nome: str):
     except Exception: pass
 
 async def obter_historico_usuario(user_id: int, limite: int = 15):
-    """Obtém o histórico do próprio usuário com a data já formatada para o Brasil."""
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
             async with conn.execute("""
@@ -448,7 +475,6 @@ async def excluir_ultima_os(user_id: int) -> bool:
     except Exception: return False
 
 async def obter_todos_dados_mes(ano: str, mes: str):
-    """Gera o relatório mensal exportando o NOME do técnico em vez do ID numérico."""
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
             async with conn.execute("""
@@ -471,7 +497,6 @@ async def obter_todos_dados_mes(ano: str, mes: str):
         return []
 
 async def consultar_cliente(termo_busca: str):
-    """Busca o histórico do cliente com o NOME do técnico e a data formatada para o Brasil."""
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
             async with conn.execute("""
@@ -499,8 +524,8 @@ async def apagar_os_especifica(os_id: int) -> bool:
             await conn.commit()
             return cursor.rowcount > 0 
     except Exception: return False
+
 async def obter_ranking_mes(ano: str, mes: str):
-    """Consulta os dados para montar o placar/ranking dos técnicos no mês."""
     try:
         async with aiosqlite.connect(DB_NAME) as conn:
             async with conn.execute("""
